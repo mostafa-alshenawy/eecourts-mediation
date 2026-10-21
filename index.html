@@ -32,6 +32,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-app.js";
         import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-database.js";
 
+        // إعدادات اتصال Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyAQW6GgoM1DWENB70MDxPhTMbansoZ3V4s",
             authDomain: "eecourts-mediation.firebaseapp.com",
@@ -50,12 +51,27 @@
         window.currentUser = null;
         window.activeWhatsappContext = null;
         window.activeRepTargetField = null;
+        window.clientIP = 'جاري التحقق...';
+
+        // دالة التشفير (SHA-256)
+        window.hashPassword = async function(msg) {
+            const msgBuffer = new TextEncoder().encode(msg);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        };
+
+        // جلب عنوان الـ IP للجهاز
+        fetch('https://api.ipify.org?format=json')
+            .then(r => r.json())
+            .then(d => window.clientIP = d.ip)
+            .catch(() => window.clientIP = 'غير معروف');
 
         const defaultDB = {
             users: [
-                { id: 'usr_admin', username: 'admin', password: 'Admin123', fullName: 'مدير النظام', role: 'مدير نظام', gender: 'ذكر', nationalId: '29001010100000', birthDate: '1990-01-01', email: 'admin@eecourts.gov.eg', phone: '01000000000', points: 0, createdAt: new Date().toISOString() }
+                { id: 'usr_admin', username: 'admin', password: 'Admin123', fullName: 'مدير النظام', role: 'مدير نظام', gender: 'ذكر', email: 'admin@eecourts.gov.eg', phone: '01000000000', points: 0, createdAt: new Date().toISOString() }
             ],
-            cases: [], representatives: [], schedules: [], activities: [], failedAttempts: {},
+            cases: [], deletedCases: [], representatives: [], schedules: [], activities: [],
             msg1DefendantTemplate: `السيد/ [اسم المدعى عليه] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعي]، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
             msg1ClaimantTemplate: `السيد/ [اسم المدعي] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعى عليه]، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
             msg2Template: `هيئة التحضير والوساطة بالمحاكم الاقتصادية\n*طريقك لحل نزاعك وديًا*\n\nالرجاء الاطلاع على المزايا والإجراءات للوصول لأفضل تسوية تحفظ حقوقك.`
@@ -66,12 +82,8 @@
 
         onValue(dbRef, (snapshot) => {
             const data = snapshot.val();
-            if (data) {
-                window.db = data;
-            } else {
-                window.db = defaultDB;
-                set(dbRef, window.db);
-            }
+            if (data) window.db = data;
+            else { window.db = defaultDB; set(dbRef, window.db); }
 
             if(!isDBLoaded) {
                 isDBLoaded = true;
@@ -81,25 +93,15 @@
             } else {
                 if(window.currentUser && window.activeTab) {
                     const foundUser = window.db.users.find(u => u.id === window.currentUser.id);
-                    if(foundUser) {
-                        window.currentUser = foundUser;
-                        window.updateUserPointsDisplay();
-                    }
+                    if(foundUser) { window.currentUser = foundUser; window.updateUserPointsDisplay(); }
                     window.switchTab(window.activeTab); 
                 }
             }
         });
 
-        window.saveDB = function() {
-            set(dbRef, window.db);
-        };
-
-        window.getDeviceId = function() {
-            let id = localStorage.getItem('WA_SYS_DEV_ID');
-            if(!id) { id = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase(); localStorage.setItem('WA_SYS_DEV_ID', id); }
-            return id;
-        }
-
+        window.saveDB = function() { set(dbRef, window.db); };
+        window.getDeviceId = function() { let id = localStorage.getItem('WA_SYS_DEV_ID'); if(!id) { id = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase(); localStorage.setItem('WA_SYS_DEV_ID', id); } return id; }
+        
         window.formatDateDDMMYYYY = function(dateString) {
             if (!dateString) return '';
             const parts = dateString.split('-'); 
@@ -107,30 +109,29 @@
             return dateString;
         }
 
+        window.updateSystemClock = function() {
+            const clk = document.getElementById('systemClock');
+            if(clk) {
+                clk.innerText = new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date());
+            }
+        };
+        setInterval(window.updateSystemClock, 1000);
+
         window.getCairoDateTimeString = function() { return new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date()); }
-
-        window.formatArabicTime = function(timeString) {
-            if (!timeString) return '';
-            const [hours, minutes] = timeString.split(':');
-            let h = parseInt(hours, 10);
-            const ampm = h >= 12 ? 'مساءً' : 'صباحاً';
-            h = h % 12 || 12;
-            return `${h}:${minutes} ${ampm}`;
-        }
-
+        window.formatArabicTime = function(timeString) { if (!timeString) return ''; const [hours, minutes] = timeString.split(':'); let h = parseInt(hours, 10); const ampm = h >= 12 ? 'مساءً' : 'صباحاً'; h = h % 12 || 12; return `${h}:${minutes} ${ampm}`; }
         window.getDayNameFromDate = function(dateString) { if (!dateString) return ''; return new Intl.DateTimeFormat('ar-EG', { weekday: 'long' }).format(new Date(dateString)); }
         window.generateVerificationCode = function() { return 'WAC-' + Date.now().toString().slice(-4) + '-' + Math.random().toString(36).substring(2, 5).toUpperCase(); }
 
         window.logSystemActivity = function(type, details, userFull = 'مجهول', role = 'غير مصرح') {
             if(!window.db.activities) window.db.activities = [];
-            window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: 'SYSTEM', username: 'system', userFullName: userFull, userRole: role, type: type, details: details, deviceId: window.getDeviceId(), isHidden: false });
+            window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: 'SYSTEM', username: 'system', userFullName: userFull, userRole: role, type: type, details: details, deviceId: window.getDeviceId(), ip: window.clientIP, isHidden: false });
             window.saveDB();
         }
 
         window.logActivity = function(type, details) {
             if (!window.currentUser) return;
             if(!window.db.activities) window.db.activities = [];
-            window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: window.currentUser.id, username: window.currentUser.username, userFullName: window.currentUser.fullName, userRole: window.currentUser.role, type: type, details: details, deviceId: window.getDeviceId(), isHidden: false, hiddenByUsername: null, hiddenByFullName: null });
+            window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: window.currentUser.id, username: window.currentUser.username, userFullName: window.currentUser.fullName, userRole: window.currentUser.role, type: type, details: details, deviceId: window.getDeviceId(), ip: window.clientIP, isHidden: false, hiddenByUsername: null, hiddenByFullName: null });
             window.saveDB();
         }
 
@@ -162,7 +163,11 @@
                 <div id="appContainer" class="hidden flex-grow flex flex-col">
                     <header class="bg-slate-950 border-b border-amber-500/20 px-6 py-3 no-print sticky top-0 z-50 shadow-lg">
                         <div class="max-w-7xl mx-auto flex justify-between items-center">
-                            <div><h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1><p class="text-xs text-slate-400">هيئة التحضير والوساطة وتسوية المنازعات</p></div>
+                            <div>
+                                <h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1>
+                                <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة وتسوية المنازعات</p>
+                                <p class="text-[10px] text-emerald-400 font-mono" id="systemClock"></p>
+                            </div>
                             <div class="flex items-center gap-4">
                                 <button onclick="openLeaderboard()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded shadow flex items-center gap-1 transition-all"><i class="fa-solid fa-ranking-star"></i> لوحة الشرف</button>
                                 <div id="userPointsBadge" class="bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-xs px-3 py-1.5 rounded shadow"></div>
@@ -181,6 +186,7 @@
                             <button id="tab-schedule" onclick="switchTab('schedule')" class="tab-btn px-4 py-2 rounded-lg text-slate-300 transition-colors"><i class="fa-solid fa-calendar-days ml-1"></i> جدول العمل</button>
                             <button id="tab-activity" onclick="switchTab('activity')" class="tab-btn px-4 py-2 rounded-lg text-slate-300 hidden transition-colors"><i class="fa-solid fa-shield-halved ml-1"></i> سجل النشاط</button>
                             <button id="tab-users" onclick="switchTab('users')" class="tab-btn px-4 py-2 rounded-lg text-slate-300 hidden transition-colors"><i class="fa-solid fa-users-gear ml-1"></i> إدارة النظام</button>
+                            <button id="tab-deleted" onclick="switchTab('deleted')" class="tab-btn px-4 py-2 rounded-lg text-rose-400 hidden transition-colors"><i class="fa-solid fa-trash-can ml-1"></i> الأرشيف المحذوف</button>
                         </div>
                     </nav>
 
@@ -191,25 +197,37 @@
                         <section id="view-schedule" class="hidden"></section>
                         <section id="view-activity" class="hidden"></section>
                         <section id="view-users" class="hidden"></section>
+                        <section id="view-deleted" class="hidden"></section>
                     </main>
+
+                    <footer class="mt-auto bg-slate-950 border-t border-amber-500/20 py-4 text-center no-print">
+                        <p class="text-[10px] sm:text-xs text-slate-500 font-medium">جميع حقوق الملكية الفكرية محفوظة لصالح إدارة التحضير والوساطة بمحكمة القاهرة الاقتصادية &copy; ${new Date().getFullYear()}</p>
+                    </footer>
                 </div>
                 <div id="modalsContainer"></div>
             `;
             window.buildSectionHTML();
             window.buildModalsHTML();
+            window.updateSystemClock();
         }
 
-        window.handleLogin = function(e) {
+        window.handleLogin = async function(e) {
             e.preventDefault();
             const user = document.getElementById('loginUsername').value.trim();
             const pass = document.getElementById('loginPassword').value;
             const err = document.getElementById('loginError');
             
+            const hashedInput = await window.hashPassword(pass);
             const foundUser = window.db.users.find(u => u.username.toLowerCase() === user.toLowerCase());
             
-            if (foundUser && foundUser.password === pass) {
+            // تحقق من الباسورد (سواء كان مشفر أو قديم غير مشفر) للترقية التلقائية
+            if (foundUser && (foundUser.password === hashedInput || foundUser.password === pass)) {
+                if (foundUser.password === pass) {
+                    foundUser.password = hashedInput; // ترقية لتشفير
+                    window.saveDB();
+                }
                 window.currentUser = foundUser;
-                window.logActivity('تسجيل دخول', 'تسجيل دخول ناجح');
+                window.logActivity('تسجيل دخول', 'تسجيل دخول ناجح للنظام');
                 
                 document.getElementById('loginView').classList.add('hidden');
                 document.getElementById('appContainer').classList.remove('hidden');
@@ -237,24 +255,30 @@
 
         window.setupPermissions = function() {
             const role = window.currentUser.role;
+            const isAdmin = role === 'مدير نظام';
             document.getElementById('tab-dashboard').classList.toggle('hidden', role === 'أمين سر');
-            document.getElementById('tab-activity').classList.toggle('hidden', !(role === 'مدير نظام' || role === 'مدير إدارة'));
-            document.getElementById('tab-users').classList.toggle('hidden', role !== 'مدير نظام');
+            document.getElementById('tab-activity').classList.toggle('hidden', !(isAdmin || role === 'مدير إدارة'));
+            document.getElementById('tab-users').classList.toggle('hidden', !isAdmin);
+            document.getElementById('tab-deleted').classList.toggle('hidden', !isAdmin);
+            
             const adminConfig = document.getElementById('adminConfigSection');
-            if(adminConfig) adminConfig.classList.toggle('hidden', role !== 'مدير نظام');
-            const today = new Date().toISOString().split('T')[0];
+            if(adminConfig) adminConfig.classList.toggle('hidden', !isAdmin);
+            
             const sd = document.getElementById('sessionDate');
-            if(sd) sd.min = today;
+            if(sd) sd.min = new Date().toISOString().split('T')[0];
             window.populateDropdowns();
         }
 
         window.switchTab = function(tabName) {
             window.activeTab = tabName;
             document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('bg-amber-600', 'text-white'); btn.classList.add('text-slate-300'); });
-            document.getElementById('tab-' + tabName).classList.add('bg-amber-600', 'text-white');
-            document.getElementById('tab-' + tabName).classList.remove('text-slate-300');
+            
+            const activeBtn = document.getElementById('tab-' + tabName);
+            if(tabName === 'deleted') activeBtn.classList.add('bg-rose-600', 'text-white');
+            else activeBtn.classList.add('bg-amber-600', 'text-white');
+            activeBtn.classList.remove('text-slate-300', 'text-rose-400');
 
-            ['cases', 'dashboard', 'representatives', 'schedule', 'activity', 'users'].forEach(t => { document.getElementById('view-' + t).classList.add('hidden'); });
+            ['cases', 'dashboard', 'representatives', 'schedule', 'activity', 'users', 'deleted'].forEach(t => { document.getElementById('view-' + t).classList.add('hidden'); });
             document.getElementById('view-' + tabName).classList.remove('hidden');
 
             if (tabName === 'cases') window.renderCasesTable();
@@ -263,6 +287,7 @@
             if (tabName === 'schedule') window.renderScheduleTable();
             if (tabName === 'activity') window.renderActivityTable();
             if (tabName === 'users') window.renderUsersTable();
+            if (tabName === 'deleted') window.renderDeletedTable();
         }
 
         window.buildSectionHTML = function() {
@@ -289,7 +314,13 @@
                 </div>
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
                     <div class="flex justify-between items-center mb-4"><h3 class="text-sm font-bold text-slate-200"><i class="fa-solid fa-list-check ml-1"></i> سجل القضايا المجدولة</h3><input type="text" id="searchCases" onkeyup="renderCasesTable()" class="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-xs text-white w-64 focus:border-amber-500 outline-none transition-colors" placeholder="بحث برقم الدعوى أو كود التوثيق..."></div>
-                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">الدعوى</th><th class="p-3">المدعي</th><th class="p-3">المدعى عليه</th><th class="p-3">الجلسة وأمين السر</th><th class="p-3">مُدخل البيانات</th><th class="p-3">حالة الإخطارات (أكواد التوثيق)</th><th class="p-3 text-center">الإرسال</th></tr></thead><tbody id="casesTbody" class="divide-y divide-slate-800"></tbody></table></div>
+                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">الدعوى</th><th class="p-3">المدعي</th><th class="p-3">المدعى عليه</th><th class="p-3">الجلسة وأمين السر</th><th class="p-3">مُدخل البيانات</th><th class="p-3">حالة الإخطارات (أكواد التوثيق)</th><th class="p-3 text-center">الإجراءات</th></tr></thead><tbody id="casesTbody" class="divide-y divide-slate-800"></tbody></table></div>
+                </div>
+            `;
+            document.getElementById('view-deleted').innerHTML = `
+                <div class="bg-slate-900 border border-rose-900/50 rounded-xl p-6 shadow-xl">
+                    <h3 class="text-sm font-bold text-rose-400 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-trash-can-arrow-up ml-1"></i> الأرشيف السري للقضايا المحذوفة</h3>
+                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-rose-400"><tr><th class="p-3">الدعوى</th><th class="p-3">المدعي / المدعى عليه</th><th class="p-3">تاريخ الجلسة</th><th class="p-3">منشئ الدعوى الأصلي</th><th class="p-3">تفاصيل الحذف</th></tr></thead><tbody id="deletedTbody" class="divide-y divide-slate-800"></tbody></table></div>
                 </div>
             `;
             document.getElementById('view-dashboard').innerHTML = `
@@ -337,15 +368,19 @@
                         <div><label class="block text-slate-400 mb-1">إلى تاريخ:</label><input type="date" id="actTo" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></div>
                         <div><label class="block text-slate-400 mb-1">المستخدم:</label><select id="actUser" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></select></div>
                     </div>
-                    <div class="overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">التوقيت</th><th class="p-3">المستخدم</th><th class="p-3">العملية</th><th class="p-3">التفاصيل</th><th class="p-3">معرف الجهاز (Device ID)</th><th class="p-3 text-center">التحكم</th></tr></thead><tbody id="activityTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
+                    <div class="overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">التوقيت</th><th class="p-3">المستخدم</th><th class="p-3">العملية</th><th class="p-3">التفاصيل</th><th class="p-3">الـ IP والجهاز</th><th class="p-3 text-center">التحكم</th></tr></thead><tbody id="activityTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
                 </div>
             `;
             document.getElementById('view-users').innerHTML = `
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 flex justify-between items-center shadow-md">
-                    <h3 class="font-bold text-amber-400"><i class="fa-solid fa-users-gear ml-1"></i> إدارة الحسابات</h3>
-                    <button onclick="openUserModal()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded text-xs font-bold transition-all"><i class="fa-solid fa-user-plus ml-1"></i> إضافة حساب</button>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 flex flex-wrap justify-between items-center shadow-md gap-4">
+                    <h3 class="font-bold text-amber-400"><i class="fa-solid fa-users-gear ml-1"></i> إدارة الحسابات والبيانات</h3>
+                    <div class="flex gap-2">
+                        <button onclick="exportData('word')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-word ml-1"></i> تصدير Word</button>
+                        <button onclick="exportData('excel')" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-csv ml-1"></i> تصدير Excel</button>
+                        <button onclick="openUserModal()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-user-plus ml-1"></i> إضافة حساب</button>
+                    </div>
                 </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">حساب الدخول</th><th class="p-3">الاسم الكامل</th><th class="p-3">الصفة</th><th class="p-3">النقاط</th><th class="p-3">التاريخ</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="usersTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">حساب الدخول</th><th class="p-3">الاسم الكامل</th><th class="p-3">الصفة</th><th class="p-3">النقاط</th><th class="p-3">تاريخ الإضافة</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="usersTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
                 <div id="adminConfigSection" class="bg-slate-900 border border-slate-800 rounded-xl p-6 hidden">
                     <h3 class="text-sm font-bold text-amber-400 mb-3"><i class="fa-solid fa-envelope-open-text ml-1"></i> إدارة قالب الرسالة التوعوية (الرسالة الثانية)</h3>
                     <textarea id="adminMsg2" rows="5" class="w-full bg-slate-800 border border-slate-700 rounded p-3 text-xs text-white mb-3 outline-none focus:border-amber-500"></textarea>
@@ -376,7 +411,7 @@
                             <div><label class="text-slate-400 block mb-1">الاسم (مغلق)</label><input type="text" id="profFullName" disabled class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-2 cursor-not-allowed"></div>
                             <div><label class="text-slate-400 block mb-1">الصفة الوظيفية (مغلق)</label><input type="text" id="profRole" disabled class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-2 cursor-not-allowed"></div>
                             <div><label class="text-slate-300 block mb-1">البريد الإلكتروني (@eecourts.gov.eg)</label><input type="text" id="profEmail" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 text-left outline-none focus:border-amber-500" dir="ltr"></div>
-                            <div><label class="text-slate-300 block mb-1">كلمة المرور</label><input type="password" id="profPass" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"></div>
+                            <div><label class="text-slate-300 block mb-1">كلمة المرور الجديدة (أتركها فارغة إذا لم ترد التغيير)</label><input type="password" id="profPass" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" placeholder="••••••••"></div>
                             <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-2.5 rounded hover:brightness-110 transition-all mt-2">حفظ التعديلات</button>
                         </form>
                     </div>
@@ -397,7 +432,7 @@
                             <input type="hidden" id="uId">
                             <div><label class="text-slate-300 block mb-1">اسم الدخول (Username)</label><input type="text" id="uUser" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" dir="ltr"></div>
                             <div><label class="text-slate-300 block mb-1">الاسم الكامل المطابق للهوية</label><input type="text" id="uName" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"></div>
-                            <div><label class="text-slate-300 block mb-1">كلمة المرور المبدئية</label><input type="password" id="uPass" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"></div>
+                            <div><label class="text-slate-300 block mb-1">كلمة المرور</label><input type="password" id="uPass" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" placeholder="••••••••"></div>
                             <div><label class="text-slate-300 block mb-1">الصفة الوظيفية (الصلاحية)</label><select id="uRole" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"><option>أمين سر</option><option>قاضي تحضير</option><option>مدير إدارة</option><option>مدير نظام</option></select></div>
                             <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-2.5 rounded hover:brightness-110 mt-2 transition-all">حفظ واعتماد الحساب</button>
                         </form>
@@ -444,13 +479,16 @@
         window.openProfileModal = function() {
             document.getElementById('profFullName').value = window.currentUser.fullName;
             document.getElementById('profRole').value = window.currentUser.role;
-            document.getElementById('profEmail').value = window.currentUser.email.replace('@eecourts.gov.eg', '');
-            document.getElementById('profPass').value = window.currentUser.password;
+            document.getElementById('profEmail').value = window.currentUser.email ? window.currentUser.email.replace('@eecourts.gov.eg', '') : '';
+            document.getElementById('profPass').value = ''; 
             document.getElementById('profileModal').classList.remove('hidden');
         }
-        window.saveProfile = function(e) {
+        
+        window.saveProfile = async function(e) {
             e.preventDefault(); const u = window.db.users.find(x => x.id === window.currentUser.id);
-            u.email = document.getElementById('profEmail').value + '@eecourts.gov.eg'; u.password = document.getElementById('profPass').value;
+            u.email = document.getElementById('profEmail').value + '@eecourts.gov.eg'; 
+            const newPass = document.getElementById('profPass').value;
+            if(newPass) { u.password = await window.hashPassword(newPass); }
             window.currentUser = u; window.saveDB(); window.closeModal('profileModal'); alert('تم الحفظ بنجاح.');
         }
 
@@ -462,12 +500,37 @@
                 claimant: document.getElementById('claimantName').value, claimantPhone: document.getElementById('claimantPhone').value,
                 defendant: document.getElementById('defendantName').value, defendantPhone: document.getElementById('defendantPhone').value,
                 dateStr: window.formatDateDDMMYYYY(sessionDate), dayStr: window.getDayNameFromDate(sessionDate), timeStr: window.formatArabicTime(document.getElementById('sessionTime').value),
-                secretaryName: secretaryChoice, creator: window.currentUser.fullName, notificationsSent: []
+                secretaryName: secretaryChoice, creator: window.currentUser.fullName, createdAt: window.getCairoDateTimeString(), notificationsSent: []
             };
             if(!window.db.cases) window.db.cases = [];
             window.db.cases.unshift(newCase);
             window.addPoint('تسجيل دعوى'); window.logActivity('تسجيل دعوى', `تسجيل دعوى رقم ${newCase.caseNum}`);
             e.target.reset(); window.renderCasesTable();
+        }
+
+        window.deleteCase = function(id) {
+            if(!confirm('تحذير مدير النظام: هل أنت متأكد من حذف هذه الدعوى؟\nسيتم نقل الدعوى للأرشيف السري، وخصم نقطة من الموظف الذي أدخلها.')) return;
+            const cIndex = window.db.cases.findIndex(c => c.id === id);
+            if(cIndex > -1) {
+                const caseData = window.db.cases[cIndex];
+                
+                // خصم النقطة
+                const u = window.db.users.find(usr => usr.fullName === caseData.creator);
+                if(u && u.points > 0) u.points--;
+                
+                // النقل للمحذوفات
+                if(!window.db.deletedCases) window.db.deletedCases = [];
+                caseData.deletedAt = window.getCairoDateTimeString();
+                caseData.deletedBy = window.currentUser.fullName;
+                window.db.deletedCases.unshift(caseData);
+                
+                // الحذف من الجدول
+                window.db.cases.splice(cIndex, 1);
+                
+                window.logActivity('حذف دعوى (صلاحية مدير)', `حذف الدعوى ${caseData.caseNum} للمدعي ${caseData.claimant}`);
+                window.saveDB();
+                window.renderCasesTable();
+            }
         }
 
         window.renderCasesTable = function() {
@@ -485,8 +548,42 @@
                     <td class="p-3 text-xs"><span class="bg-slate-900 px-2 py-1 rounded inline-block mb-1"><span dir="ltr" class="font-mono text-white">${c.dateStr}</span> ${c.dayStr} <span class="text-amber-400 mx-1">|</span> ${c.timeStr}</span><br><span class="text-[10px] text-slate-400">أمين السر: <span class="text-slate-300 font-bold">${c.secretaryName || 'غير محدد'}</span></span></td>
                     <td class="p-3 text-[11px] text-slate-400">${c.creator}</td>
                     <td class="p-3 text-[10px]">${(c.notificationsSent && c.notificationsSent.length) ? c.notificationsSent.map(n => `<div class="bg-slate-950 border border-slate-800 p-1.5 mb-1 rounded"><span class="text-emerald-400">✓ ${n.type} لـ ${n.target === 'def' ? 'المدعى عليه' : 'المدعي'}</span><br><span class="text-amber-500 font-mono">كود: ${n.verificationCode}</span><br><span class="text-slate-500">بواسطة: ${n.sender}</span></div>`).join('') : '<span class="text-slate-600">لم تُرسل إخطارات</span>'}</td>
-                    <td class="p-3 text-center flex flex-col gap-1.5"><button onclick="prepWA('${c.id}', 'def')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] px-2 py-1.5 rounded transition-colors shadow"><i class="fa-brands fa-whatsapp ml-1"></i>للمدعى عليه</button><button onclick="prepWA('${c.id}', 'claim')" class="bg-teal-600 hover:bg-teal-500 text-white text-[10px] px-2 py-1.5 rounded transition-colors shadow"><i class="fa-brands fa-whatsapp ml-1"></i>للمدعي</button></td>
+                    <td class="p-3 text-center flex flex-col gap-1.5">
+                        <button onclick="prepWA('${c.id}', 'def')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] px-2 py-1.5 rounded transition-colors shadow"><i class="fa-brands fa-whatsapp ml-1"></i>للمدعى عليه</button>
+                        <button onclick="prepWA('${c.id}', 'claim')" class="bg-teal-600 hover:bg-teal-500 text-white text-[10px] px-2 py-1.5 rounded transition-colors shadow"><i class="fa-brands fa-whatsapp ml-1"></i>للمدعي</button>
+                        ${window.currentUser.role === 'مدير نظام' ? `<button onclick="deleteCase('${c.id}')" class="bg-rose-900/50 hover:bg-rose-700 text-rose-300 hover:text-white border border-rose-800 text-[10px] px-2 py-1.5 rounded transition-colors shadow mt-1"><i class="fa-solid fa-trash-can ml-1"></i>حذف كمدير</button>` : ''}
+                    </td>
                 </tr>`).join('');
+        }
+
+        window.renderDeletedTable = function() {
+            const tbody = document.getElementById('deletedTbody');
+            const dCases = window.db.deletedCases || [];
+            if(dCases.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-500">الأرشيف السري فارغ. لا توجد قضايا محذوفة.</td></tr>'; return; }
+            tbody.innerHTML = dCases.map(c => `
+                <tr class="hover:bg-rose-950/20 transition-colors">
+                    <td class="p-3 font-bold text-amber-400 font-mono">${c.caseNum}</td>
+                    <td class="p-3 text-xs"><span class="text-slate-400">المدعي:</span> ${c.claimant}<br><span class="text-slate-400">المدعى عليه:</span> ${c.defendant}</td>
+                    <td class="p-3 text-xs font-mono">${c.dateStr}</td>
+                    <td class="p-3 text-xs">${c.creator}<br><span class="text-[10px] text-slate-500">وقت الإنشاء: ${c.createdAt || 'قديم'}</span></td>
+                    <td class="p-3 text-xs"><span class="text-rose-400 font-bold"><i class="fa-solid fa-user-xmark ml-1"></i>حذف بواسطة: ${c.deletedBy}</span><br><span class="text-[10px] text-slate-500 font-mono mt-1 block">${c.deletedAt}</span></td>
+                </tr>`).join('');
+        }
+
+        window.exportData = function(type) {
+            if(type === 'excel') {
+                let csv = '\ufeffرقم الدعوى,المدعي,هاتف المدعي,المدعى عليه,هاتف المدعى عليه,أمين السر,تاريخ الجلسة,وقت الجلسة,مدخل البيانات\n';
+                (window.db.cases||[]).forEach(c => { csv += `${c.caseNum},${c.claimant},${c.claimantPhone},${c.defendant},${c.defendantPhone},${c.secretaryName},${c.dateStr},${c.timeStr},${c.creator}\n`; });
+                let blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+                let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'سجل_قضايا_الوساطة.csv'; a.click();
+            } else if(type === 'word') {
+                let html = "<html dir='rtl'><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;'><h2 style='text-align:center;'>سجل القضايا المجدولة - إدارة التحضير والوساطة</h2><br><table border='1' cellpadding='5' style='border-collapse:collapse;width:100%;text-align:right;'><tr><th>رقم الدعوى</th><th>المدعي</th><th>المدعى عليه</th><th>أمين السر</th><th>تاريخ الجلسة</th></tr>";
+                (window.db.cases||[]).forEach(c => { html += `<tr><td>${c.caseNum}</td><td>${c.claimant}</td><td>${c.defendant}</td><td>${c.secretaryName}</td><td>${c.dateStr}</td></tr>`; });
+                html += "</table><br><p style='text-align:center;font-size:12px;'>جميع حقوق الملكية الفكرية محفوظة لمحكمة القاهرة الاقتصادية</p></body></html>";
+                let blob = new Blob(['\ufeff', html], {type: 'application/msword'});
+                let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'تقرير_قضايا_الوساطة.doc'; a.click();
+            }
+            window.logActivity('تصدير بيانات', `قام مدير النظام بتصدير بيانات القضايا بصيغة ${type}`);
         }
 
         window.prepWA = function(caseId, target) {
@@ -524,7 +621,7 @@
             tb.innerHTML = aFilter.map(a => {
                 if(a.isHidden && window.currentUser.role !== 'مدير نظام' && a.hiddenByUsername !== window.currentUser.username) return '';
                 let trClass = 'hover:bg-slate-800/60 transition-colors'; if(a.type === 'محاولة دخول غير مشروعة') trClass = 'bg-rose-950/40 border-l-4 border-rose-500'; if(a.isHidden) trClass = 'opacity-50 line-through bg-rose-950/20';
-                return `<tr class="${trClass}"><td class="p-3 font-mono text-slate-400 text-[10px]">${a.cairoTime}</td><td class="p-3 font-bold">${a.userFullName} <br><span class="text-amber-500 text-[10px]">${a.userRole}</span></td><td class="p-3 ${a.type === 'محاولة دخول غير مشروعة' ? 'text-rose-400 font-bold' : ''}">${a.type}</td><td class="p-3">${a.details}</td><td class="p-3 font-mono text-[10px] text-slate-500">${a.deviceId}</td><td class="p-3 text-center">${!a.isHidden && (window.currentUser.role === 'مدير إدارة' || window.currentUser.role === 'مدير نظام') ? `<button onclick="toggleAct('${a.id}',true)" class="text-rose-400 hover:text-rose-300 text-[10px] font-bold">إخفاء</button>` : ''} ${a.isHidden ? `<span class="block text-[9px] text-rose-300">أخفاه: ${a.hiddenByFullName}</span>${(window.currentUser.role === 'مدير نظام' || window.currentUser.username === a.hiddenByUsername) ? `<button onclick="toggleAct('${a.id}',false)" class="text-amber-400 hover:text-amber-300 text-[10px] font-bold mt-1">إعادة إظهار</button>` : ''}` : ''}</td></tr>`;
+                return `<tr class="${trClass}"><td class="p-3 font-mono text-slate-400 text-[10px]">${a.cairoTime}</td><td class="p-3 font-bold">${a.userFullName} <br><span class="text-amber-500 text-[10px]">${a.userRole}</span></td><td class="p-3 ${a.type === 'محاولة دخول غير مشروعة' ? 'text-rose-400 font-bold' : ''}">${a.type}</td><td class="p-3 text-xs">${a.details}</td><td class="p-3 font-mono text-[10px] text-slate-500"><i class="fa-solid fa-network-wired ml-1"></i>${a.ip || 'غير متوفر'}<br><span class="text-[9px] text-slate-600 block mt-1">${a.deviceId}</span></td><td class="p-3 text-center">${!a.isHidden && (window.currentUser.role === 'مدير إدارة' || window.currentUser.role === 'مدير نظام') ? `<button onclick="toggleAct('${a.id}',true)" class="text-rose-400 hover:text-rose-300 text-[10px] font-bold">إخفاء</button>` : ''} ${a.isHidden ? `<span class="block text-[9px] text-rose-300">أخفاه: ${a.hiddenByFullName}</span>${(window.currentUser.role === 'مدير نظام' || window.currentUser.username === a.hiddenByUsername) ? `<button onclick="toggleAct('${a.id}',false)" class="text-amber-400 hover:text-amber-300 text-[10px] font-bold mt-1">إعادة إظهار</button>` : ''}` : ''}</td></tr>`;
             }).join('');
         }
         window.toggleAct = function(id, hide) { const a = window.db.activities.find(x => x.id === id); a.isHidden = hide; a.hiddenByUsername = hide ? window.currentUser.username : null; a.hiddenByFullName = hide ? window.currentUser.fullName : null; window.saveDB(); window.renderActivityTable(); }
@@ -557,21 +654,29 @@
 
         window.openUserModal = function(id=null) {
             document.getElementById('uId').value = id || ''; document.getElementById('uUser').value = id ? window.db.users.find(x=>x.id===id).username : ''; document.getElementById('uUser').disabled = !!id;
-            if(id) { const u = window.db.users.find(x=>x.id===id); document.getElementById('uName').value = u.fullName; document.getElementById('uPass').value = u.password; document.getElementById('uRole').value = u.role; } else { document.getElementById('uName').value = ''; document.getElementById('uPass').value = ''; }
+            if(id) { const u = window.db.users.find(x=>x.id===id); document.getElementById('uName').value = u.fullName; document.getElementById('uPass').value = ''; document.getElementById('uPass').placeholder = 'اتركه فارغاً إذا لم ترد التغيير'; document.getElementById('uPass').required = false; document.getElementById('uRole').value = u.role; } else { document.getElementById('uName').value = ''; document.getElementById('uPass').value = ''; document.getElementById('uPass').placeholder = '••••••••'; document.getElementById('uPass').required = true; }
             document.getElementById('userModal').classList.remove('hidden');
         }
-        window.saveUser = function(e) {
+        
+        window.saveUser = async function(e) {
             e.preventDefault(); const id = document.getElementById('uId').value;
+            const inputPass = document.getElementById('uPass').value;
+            let finalPass = null;
+            if(inputPass) finalPass = await window.hashPassword(inputPass);
+
             if(id) {
-                const u = window.db.users.find(x=>x.id===id); u.fullName = document.getElementById('uName').value; u.password = document.getElementById('uPass').value; u.role = document.getElementById('uRole').value;
+                const u = window.db.users.find(x=>x.id===id); u.fullName = document.getElementById('uName').value; u.role = document.getElementById('uRole').value;
+                if(finalPass) u.password = finalPass;
             } else { 
                 const existing = window.db.users.find(x=>x.username.toLowerCase() === document.getElementById('uUser').value.toLowerCase());
                 if(existing) { alert('اسم الدخول مستخدم مسبقاً!'); return; }
-                window.db.users.push({id:'usr_'+Date.now(), username:document.getElementById('uUser').value, fullName:document.getElementById('uName').value, password:document.getElementById('uPass').value, role:document.getElementById('uRole').value, email:'', points:0, createdAt:new Date().toISOString()}); 
+                window.db.users.push({id:'usr_'+Date.now(), username:document.getElementById('uUser').value, fullName:document.getElementById('uName').value, password:finalPass, role:document.getElementById('uRole').value, email:'', points:0, createdAt:new Date().toISOString()}); 
             }
             window.saveDB(); window.closeModal('userModal'); window.renderUsersTable(); window.populateDropdowns();
         }
+        
         window.deleteUser = function(id) { if(!confirm("هل أنت متأكد من حذف هذا المستخدم نهائياً؟")) return; window.db.users = window.db.users.filter(x => x.id !== id); window.saveDB(); window.renderUsersTable(); window.populateDropdowns(); }
+        
         window.renderUsersTable = function() {
             document.getElementById('usersTbody').innerHTML = window.db.users.map(u => `<tr class="hover:bg-slate-800/60"><td class="p-3 font-mono font-bold">${u.username}</td><td class="p-3">${u.fullName}</td><td class="p-3 text-amber-400 font-bold">${u.role}</td><td class="p-3 font-mono text-emerald-400 font-bold">🏅 ${u.points||0}</td><td class="p-3"><span dir="ltr" class="text-slate-400">${window.formatDateDDMMYYYY(u.createdAt.split('T')[0])}</span></td><td class="p-3 text-center"><button onclick="openUserModal('${u.id}')" class="bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white px-2 py-1 rounded text-xs transition-colors"><i class="fa-solid fa-pen"></i></button> ${window.currentUser.role === 'مدير نظام' && u.username !== 'admin' ? `<button onclick="deleteUser('${u.id}')" class="bg-rose-600/20 text-rose-400 hover:bg-rose-600 hover:text-white px-2 py-1 rounded text-xs mr-1 transition-colors"><i class="fa-solid fa-trash-can"></i></button>` : ''}</td></tr>`).join('');
             document.getElementById('adminMsg2').value = window.db.msg2Template;
@@ -582,8 +687,8 @@
         window.renderDashboard = function() {
             const fDate = document.getElementById('dashFrom').value; const tDate = document.getElementById('dashTo').value; const usr = document.getElementById('dashUser').value;
             let cFilter = window.db.cases || [];
-            if(fDate) cFilter = cFilter.filter(c => new Date(c.createdAt || Date.now()) >= new Date(fDate));
-            if(tDate) cFilter = cFilter.filter(c => new Date(c.createdAt || Date.now()) <= new Date(tDate + 'T23:59:59'));
+            if(fDate) cFilter = cFilter.filter(c => { const parts=c.dateStr.split('/'); return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) >= new Date(fDate); });
+            if(tDate) cFilter = cFilter.filter(c => { const parts=c.dateStr.split('/'); return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) <= new Date(tDate + 'T23:59:59'); });
             if(usr) cFilter = cFilter.filter(c => c.creator === usr);
 
             document.getElementById('dashTotalCases').innerText = cFilter.length;
