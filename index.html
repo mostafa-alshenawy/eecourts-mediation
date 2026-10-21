@@ -32,7 +32,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-app.js";
         import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-database.js";
 
-        // إعدادات اتصال Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyAQW6GgoM1DWENB70MDxPhTMbansoZ3V4s",
             authDomain: "eecourts-mediation.firebaseapp.com",
@@ -133,14 +132,22 @@
             window.saveDB();
         }
 
+        // دالة إضافة النقاط - تمنع إضافة نقاط لمدير النظام
         window.addPoint = function(reason) {
+            if (!window.currentUser || window.currentUser.role === 'مدير نظام') return; 
             const u = window.db.users.find(x => x.id === window.currentUser.id);
             if (u) { u.points = (u.points || 0) + 1; window.currentUser.points = u.points; window.saveDB(); window.updateUserPointsDisplay(); }
         }
 
         window.updateUserPointsDisplay = function() {
             const ptsElem = document.getElementById('userPointsBadge');
-            if (ptsElem && window.currentUser) ptsElem.innerText = `🏅 النقاط: ${window.currentUser.points || 0}`;
+            if (ptsElem && window.currentUser) {
+                if (window.currentUser.role === 'مدير نظام') {
+                    ptsElem.innerText = `مدير نظام (بدون نقاط)`;
+                } else {
+                    ptsElem.innerText = `🏅 النقاط: ${window.currentUser.points || 0}`;
+                }
+            }
         }
 
         window.renderMainLayout = function() {
@@ -204,7 +211,7 @@
                     </main>
 
                     <footer class="mt-auto bg-slate-950 border-t border-amber-500/20 py-4 text-center no-print">
-                        <p class="text-xs text-amber-500/80 font-bold tracking-wide">جميع حقوق الملكية الفكرية محفوظة لصالح هيئة التحضير والوساطة بمحكمة القاهرة الاقتصادية &copy; ${new Date().getFullYear()}</p>
+                        <p class="text-sm gold-text font-bold tracking-wider">جميع الحقوق محفوظة لإدارة التحضير والوساطة بمحكمة القاهرة الاقتصادية &copy; ${new Date().getFullYear()}</p>
                     </footer>
                 </div>
                 <div id="modalsContainer"></div>
@@ -469,7 +476,7 @@
 
         window.populateDropdowns = function() {
             const du = document.getElementById('dashUser'); const au = document.getElementById('actUser');
-            const usersOpts = `<option value="">الكل (بدون تصفية)</option>` + window.db.users.map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
+            const usersOpts = `<option value="">الكل (بدون تصفية)</option>` + window.db.users.filter(u => u.username !== 'admin').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
             if(du) du.innerHTML = usersOpts; if(au) au.innerHTML = usersOpts;
 
             const cs = document.getElementById('caseSec'); const jg = document.getElementById('schJudge'); const sc = document.getElementById('schSec');
@@ -529,15 +536,15 @@
             if(cIndex > -1) {
                 const caseData = window.db.cases[cIndex];
                 
-                // خصم نقطة الإدخال
+                // خصم نقطة الإدخال (مع التأكد من عدم المساس بمدير النظام)
                 const u = window.db.users.find(usr => usr.fullName === caseData.creator);
-                if(u && u.points > 0) u.points--;
+                if(u && u.points > 0 && u.role !== 'مدير نظام') u.points--;
 
                 // خصم نقاط الرسائل المُرسلة لهذه الدعوى
                 if (caseData.notificationsSent && caseData.notificationsSent.length > 0) {
                     caseData.notificationsSent.forEach(notification => {
                         const senderUser = window.db.users.find(usr => usr.fullName === notification.sender);
-                        if (senderUser && senderUser.points > 0) senderUser.points--;
+                        if (senderUser && senderUser.points > 0 && senderUser.role !== 'مدير نظام') senderUser.points--;
                     });
                 }
                 
@@ -719,7 +726,7 @@
             document.getElementById('dashTotalMsgs').innerText = tMsg;
             const mC = cFilter.filter(c => (c.dateStr || '').includes(String(new Date().getMonth()+1).padStart(2,'0')+'/'+new Date().getFullYear())).length;
             document.getElementById('dashMonthCases').innerText = mC;
-            document.getElementById('dashTeamPts').innerText = window.db.users.reduce((a,b)=>a+(b.points||0),0);
+            document.getElementById('dashTeamPts').innerText = window.db.users.filter(u => u.username !== 'admin').reduce((a,b)=>a+(b.points||0),0);
 
             if(c1) c1.destroy(); if(c2) c2.destroy();
             c1 = new Chart(document.getElementById('chart1').getContext('2d'), { type:'bar', data: { labels:['إجمالي القضايا','رسائل الإخطارات'], datasets:[{label:'العدد', data:[cFilter.length, tMsg], backgroundColor:['#d4af37','#10b981'], borderRadius: 4}] }, options:{responsive:true,maintainAspectRatio:false, plugins:{legend:{labels:{color:'#cbd5e1'}}}, scales:{y:{ticks:{color:'#94a3b8'}, grid:{color:'#334155'}},x:{ticks:{color:'#cbd5e1'}, grid:{display:false}}}} });
