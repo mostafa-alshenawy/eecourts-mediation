@@ -53,7 +53,6 @@
         window.activeRepTargetField = null;
         window.clientIP = 'جاري التحقق...';
 
-        // دالة التشفير (SHA-256)
         window.hashPassword = async function(msg) {
             const msgBuffer = new TextEncoder().encode(msg);
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
@@ -61,7 +60,6 @@
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         };
 
-        // جلب عنوان الـ IP للجهاز
         fetch('https://api.ipify.org?format=json')
             .then(r => r.json())
             .then(d => window.clientIP = d.ip)
@@ -161,19 +159,24 @@
                 </div>
 
                 <div id="appContainer" class="hidden flex-grow flex flex-col">
-                    <header class="bg-slate-950 border-b border-amber-500/20 px-6 py-3 no-print sticky top-0 z-50 shadow-lg">
-                        <div class="max-w-7xl mx-auto flex justify-between items-center">
-                            <div>
+                    <header class="bg-slate-950 border-b border-amber-500/20 px-6 py-3 no-print sticky top-0 z-50 shadow-lg relative">
+                        <div class="max-w-7xl mx-auto flex items-center justify-between">
+                            <div class="w-1/3">
                                 <h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1>
-                                <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة وتسوية المنازعات</p>
-                                <p class="text-[10px] text-emerald-400 font-mono" id="systemClock"></p>
+                                <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة</p>
                             </div>
-                            <div class="flex items-center gap-4">
-                                <button onclick="openLeaderboard()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded shadow flex items-center gap-1 transition-all"><i class="fa-solid fa-ranking-star"></i> لوحة الشرف</button>
+                            <div class="w-1/3 flex justify-center text-center">
+                                <div class="bg-slate-900 border border-slate-800 px-5 py-2 rounded-full shadow-inner flex items-center gap-2">
+                                    <i class="fa-regular fa-clock text-amber-500"></i>
+                                    <span class="text-xs text-emerald-400 font-bold tracking-wide" id="systemClock"></span>
+                                </div>
+                            </div>
+                            <div class="w-1/3 flex items-center justify-end gap-3">
+                                <button onclick="openLeaderboard()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded shadow flex items-center gap-1 transition-all"><i class="fa-solid fa-ranking-star"></i> <span class="hidden sm:inline">لوحة الشرف</span></button>
                                 <div id="userPointsBadge" class="bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-xs px-3 py-1.5 rounded shadow"></div>
-                                <div class="text-right hidden sm:block"><p class="text-xs font-bold text-slate-200" id="navUserName"></p><span class="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] px-2 py-0.5 rounded" id="navUserRole"></span></div>
+                                <div class="text-right hidden md:block"><p class="text-xs font-bold text-slate-200" id="navUserName"></p><span class="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] px-2 py-0.5 rounded" id="navUserRole"></span></div>
                                 <button onclick="openProfileModal()" class="bg-slate-800 hover:bg-amber-600/30 text-slate-300 border border-slate-700 p-2 rounded-lg text-xs transition-colors" title="الملف الشخصي"><i class="fa-solid fa-user-gear"></i></button>
-                                <button onclick="logout()" class="bg-slate-800 hover:bg-rose-900/50 text-slate-300 hover:text-rose-300 border border-slate-700 p-2 rounded-lg text-xs transition-colors"><i class="fa-solid fa-arrow-right-from-bracket ml-1"></i> خروج</button>
+                                <button onclick="logout()" class="bg-slate-800 hover:bg-rose-900/50 text-slate-300 hover:text-rose-300 border border-slate-700 p-2 rounded-lg text-xs transition-colors" title="خروج"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
                             </div>
                         </div>
                     </header>
@@ -201,7 +204,7 @@
                     </main>
 
                     <footer class="mt-auto bg-slate-950 border-t border-amber-500/20 py-4 text-center no-print">
-                        <p class="text-[10px] sm:text-xs text-slate-500 font-medium">جميع حقوق الملكية الفكرية محفوظة لصالح إدارة التحضير والوساطة بمحكمة القاهرة الاقتصادية &copy; ${new Date().getFullYear()}</p>
+                        <p class="text-xs text-amber-500/80 font-bold tracking-wide">جميع حقوق الملكية الفكرية محفوظة لصالح هيئة التحضير والوساطة بمحكمة القاهرة الاقتصادية &copy; ${new Date().getFullYear()}</p>
                     </footer>
                 </div>
                 <div id="modalsContainer"></div>
@@ -220,10 +223,9 @@
             const hashedInput = await window.hashPassword(pass);
             const foundUser = window.db.users.find(u => u.username.toLowerCase() === user.toLowerCase());
             
-            // تحقق من الباسورد (سواء كان مشفر أو قديم غير مشفر) للترقية التلقائية
             if (foundUser && (foundUser.password === hashedInput || foundUser.password === pass)) {
                 if (foundUser.password === pass) {
-                    foundUser.password = hashedInput; // ترقية لتشفير
+                    foundUser.password = hashedInput; 
                     window.saveDB();
                 }
                 window.currentUser = foundUser;
@@ -324,6 +326,13 @@
                 </div>
             `;
             document.getElementById('view-dashboard').innerHTML = `
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold text-amber-400"><i class="fa-solid fa-chart-line ml-1"></i> لوحة الإحصائيات (الداش بورد)</h2>
+                    <div class="flex gap-2">
+                        <button onclick="exportData('word')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-word ml-1"></i> تصدير Word</button>
+                        <button onclick="exportData('excel')" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-csv ml-1"></i> تصدير Excel</button>
+                    </div>
+                </div>
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex gap-4 text-xs mb-6">
                     <div><label class="block text-slate-400 mb-1">من تاريخ:</label><input type="date" id="dashFrom" onchange="renderDashboard()" class="bg-slate-800 border-slate-700 rounded p-1.5 text-white outline-none"></div>
                     <div><label class="block text-slate-400 mb-1">إلى تاريخ:</label><input type="date" id="dashTo" onchange="renderDashboard()" class="bg-slate-800 border-slate-700 rounded p-1.5 text-white outline-none"></div>
@@ -363,10 +372,16 @@
             `;
             document.getElementById('view-activity').innerHTML = `
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                    <div class="flex gap-4 mb-6 text-xs">
-                        <div><label class="block text-slate-400 mb-1">من تاريخ:</label><input type="date" id="actFrom" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></div>
-                        <div><label class="block text-slate-400 mb-1">إلى تاريخ:</label><input type="date" id="actTo" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></div>
-                        <div><label class="block text-slate-400 mb-1">المستخدم:</label><select id="actUser" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></select></div>
+                    <div class="flex justify-between items-center mb-6">
+                        <div class="flex gap-4 text-xs">
+                            <div><label class="block text-slate-400 mb-1">من تاريخ:</label><input type="date" id="actFrom" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></div>
+                            <div><label class="block text-slate-400 mb-1">إلى تاريخ:</label><input type="date" id="actTo" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></div>
+                            <div><label class="block text-slate-400 mb-1">المستخدم:</label><select id="actUser" onchange="renderActivityTable()" class="bg-slate-800 border border-slate-700 rounded p-1.5 text-white outline-none"></select></div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="exportData('word')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-word ml-1"></i> تصدير Word</button>
+                            <button onclick="exportData('excel')" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-csv ml-1"></i> تصدير Excel</button>
+                        </div>
                     </div>
                     <div class="overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">التوقيت</th><th class="p-3">المستخدم</th><th class="p-3">العملية</th><th class="p-3">التفاصيل</th><th class="p-3">الـ IP والجهاز</th><th class="p-3 text-center">التحكم</th></tr></thead><tbody id="activityTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
                 </div>
@@ -509,25 +524,33 @@
         }
 
         window.deleteCase = function(id) {
-            if(!confirm('تحذير مدير النظام: هل أنت متأكد من حذف هذه الدعوى؟\nسيتم نقل الدعوى للأرشيف السري، وخصم نقطة من الموظف الذي أدخلها.')) return;
+            if(!confirm('تحذير مدير النظام: هل أنت متأكد من حذف هذه الدعوى؟\nسيتم نقل الدعوى للأرشيف السري، وخصم نقطة الإدخال ونقاط الرسائل المُرسلة منها.')) return;
             const cIndex = window.db.cases.findIndex(c => c.id === id);
             if(cIndex > -1) {
                 const caseData = window.db.cases[cIndex];
                 
-                // خصم النقطة
+                // خصم نقطة الإدخال
                 const u = window.db.users.find(usr => usr.fullName === caseData.creator);
                 if(u && u.points > 0) u.points--;
+
+                // خصم نقاط الرسائل المُرسلة لهذه الدعوى
+                if (caseData.notificationsSent && caseData.notificationsSent.length > 0) {
+                    caseData.notificationsSent.forEach(notification => {
+                        const senderUser = window.db.users.find(usr => usr.fullName === notification.sender);
+                        if (senderUser && senderUser.points > 0) senderUser.points--;
+                    });
+                }
                 
-                // النقل للمحذوفات
+                // النقل للأرشيف السري
                 if(!window.db.deletedCases) window.db.deletedCases = [];
                 caseData.deletedAt = window.getCairoDateTimeString();
                 caseData.deletedBy = window.currentUser.fullName;
                 window.db.deletedCases.unshift(caseData);
                 
-                // الحذف من الجدول
+                // إزالة الدعوى من الجدول المباشر
                 window.db.cases.splice(cIndex, 1);
                 
-                window.logActivity('حذف دعوى (صلاحية مدير)', `حذف الدعوى ${caseData.caseNum} للمدعي ${caseData.claimant}`);
+                window.logActivity('حذف دعوى (صلاحية مدير)', `حذف الدعوى ${caseData.caseNum} وخصم النقاط المرتبطة بها`);
                 window.saveDB();
                 window.renderCasesTable();
             }
@@ -579,7 +602,7 @@
             } else if(type === 'word') {
                 let html = "<html dir='rtl'><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;'><h2 style='text-align:center;'>سجل القضايا المجدولة - إدارة التحضير والوساطة</h2><br><table border='1' cellpadding='5' style='border-collapse:collapse;width:100%;text-align:right;'><tr><th>رقم الدعوى</th><th>المدعي</th><th>المدعى عليه</th><th>أمين السر</th><th>تاريخ الجلسة</th></tr>";
                 (window.db.cases||[]).forEach(c => { html += `<tr><td>${c.caseNum}</td><td>${c.claimant}</td><td>${c.defendant}</td><td>${c.secretaryName}</td><td>${c.dateStr}</td></tr>`; });
-                html += "</table><br><p style='text-align:center;font-size:12px;'>جميع حقوق الملكية الفكرية محفوظة لمحكمة القاهرة الاقتصادية</p></body></html>";
+                html += "</table><br><p style='text-align:center;font-size:12px;'>جميع حقوق الملكية الفكرية محفوظة لهيئة التحضير والوساطة بمحكمة القاهرة الاقتصادية</p></body></html>";
                 let blob = new Blob(['\ufeff', html], {type: 'application/msword'});
                 let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'تقرير_قضايا_الوساطة.doc'; a.click();
             }
