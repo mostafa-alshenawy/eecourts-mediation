@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>هيئة التحضير والوساطة - محكمة القاهرة الاقتصادية</title>
-    
-    <link rel="icon" href="logo.png" type="image/png">
-    
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
@@ -19,7 +16,6 @@
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #d4af37; }
-        img.protected-logo { user-drag: none; -webkit-user-drag: none; user-select: none; pointer-events: none; }
         @media print { .no-print { display: none !important; } body { background: white; color: black; } }
     </style>
 </head>
@@ -27,15 +23,14 @@
 
     <div id="loadingScreen" class="min-h-screen flex flex-col items-center justify-center bg-slate-950 z-50">
         <i class="fa-solid fa-scale-balanced text-amber-500 text-6xl mb-4 animate-bounce"></i>
-        <h2 class="text-xl font-bold text-slate-200" id="loadingText">جاري الاتصال الآمن بالمحكمة...</h2>
+        <h2 class="text-xl font-bold text-slate-200">جاري الاتصال بقاعدة بيانات المحكمة...</h2>
     </div>
 
     <div id="app" class="hidden flex-grow flex flex-col"></div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-app.js";
-        import { getDatabase, ref, onValue, set, off } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-database.js";
-        import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-auth.js";
+        import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.5.2/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAQW6GgoM1DWENB70MDxPhTMbansoZ3V4s",
@@ -49,19 +44,20 @@
 
         const app = initializeApp(firebaseConfig);
         const database = getDatabase(app);
-        const auth = getAuth(app);
+        const dbRef = ref(database, 'ECON_COURT_DB'); 
 
-        const secondaryApp = initializeApp(firebaseConfig, "Secondary");
-        const secondaryAuth = getAuth(secondaryApp);
-
-        let dbRef = null;
         window.activeTab = 'cases';
         window.currentUser = null;
         window.activeWhatsappContext = null;
         window.activeRepTargetField = null;
         window.clientIP = 'جاري التحقق...';
-        window.db = null;
-        window.hasLoggedSession = false; 
+
+        window.hashPassword = async function(msg) {
+            const msgBuffer = new TextEncoder().encode(msg);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        };
 
         fetch('https://api.ipify.org?format=json')
             .then(r => r.json())
@@ -69,71 +65,38 @@
             .catch(() => window.clientIP = 'غير معروف');
 
         const defaultDB = {
-            users: [], cases: [], deletedCases: [], representatives: [], schedules: [], activities: [],
+            users: [
+                { id: 'usr_admin', username: 'admin', password: 'Admin123', fullName: 'مدير النظام', role: 'مدير نظام', gender: 'ذكر', email: 'admin@eecourts.gov.eg', phone: '01000000000', points: 0, createdAt: new Date().toISOString() }
+            ],
+            cases: [], deletedCases: [], representatives: [], schedules: [], activities: [],
             msg1DefendantTemplate: `السيد/ [اسم المدعى عليه] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعي]، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
             msg1ClaimantTemplate: `السيد/ [اسم المدعي] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعى عليه]، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
             msg2Template: `هيئة التحضير والوساطة بالمحاكم الاقتصادية\n*طريقك لحل نزاعك وديًا*\n\nالرجاء الاطلاع على المزايا والإجراءات للوصول لأفضل تسوية تحفظ حقوقك.`
         };
 
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                dbRef = ref(database, 'ECON_COURT_DB'); 
-                onValue(dbRef, (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) window.db = data;
-                    else { window.db = defaultDB; set(dbRef, window.db); }
+        window.db = null;
+        let isDBLoaded = false;
 
-                    if (!window.db.users) window.db.users = [];
-                    window.currentUser = window.db.users.find(u => u.email.toLowerCase() === user.email.toLowerCase());
-                    
-                    if (!window.currentUser && user.email === 'mostafa.elshenawy@gmail.com') {
-                        window.currentUser = { id: user.uid, username: 'admin', fullName: 'مدير النظام', role: 'مدير نظام', email: user.email, phone: '01000000000', points: 0, isFirstLogin: false, createdAt: new Date().toISOString() };
-                        window.db.users.push(window.currentUser);
-                        window.saveDB();
-                    } else if (!window.currentUser) {
-                        document.getElementById('loadingScreen').classList.add('hidden');
-                        auth.signOut();
-                        alert("حسابك غير مسجل في قاعدة بيانات الموظفين.");
-                        return;
-                    }
+        onValue(dbRef, (snapshot) => {
+            const data = snapshot.val();
+            if (data) window.db = data;
+            else { window.db = defaultDB; set(dbRef, window.db); }
 
-                    if (!window.hasLoggedSession) {
-                        window.hasLoggedSession = true; 
-                        window.logActivity('تسجيل دخول', `تسجيل دخول ناجح للنظام`);
-                    }
-
-                    document.getElementById('loadingScreen').classList.add('hidden');
-                    
-                    if (window.currentUser.isFirstLogin) {
-                        document.getElementById('app').innerHTML = window.getHTMLFirstLogin();
-                        document.getElementById('app').classList.remove('hidden');
-                    } else {
-                        if (!document.getElementById('appContainer')) {
-                            window.renderMainLayout();
-                        }
-                        document.getElementById('navUserName').innerText = window.currentUser.fullName;
-                        document.getElementById('navUserRole').innerText = window.currentUser.role;
-                        window.updateUserPointsDisplay();
-                        window.setupPermissions(); 
-                        window.switchTab(window.activeTab);
-                    }
-                }, (error) => {
-                    document.getElementById('loadingScreen').classList.add('hidden');
-                    alert("عذراً، لا تملك الصلاحية للوصول إلى البيانات أو حدث خطأ في الاتصال.");
-                    auth.signOut();
-                });
-            } else {
-                if (dbRef) off(dbRef);
-                window.db = null;
-                window.currentUser = null;
-                window.hasLoggedSession = false;
+            if(!isDBLoaded) {
+                isDBLoaded = true;
                 document.getElementById('loadingScreen').classList.add('hidden');
-                document.getElementById('app').innerHTML = window.getHTMLLogin();
                 document.getElementById('app').classList.remove('hidden');
+                window.renderMainLayout();
+            } else {
+                if(window.currentUser && window.activeTab) {
+                    const foundUser = window.db.users.find(u => u.id === window.currentUser.id);
+                    if(foundUser) { window.currentUser = foundUser; window.updateUserPointsDisplay(); }
+                    window.switchTab(window.activeTab); 
+                }
             }
         });
 
-        window.saveDB = function() { if (dbRef && window.db) set(dbRef, window.db); };
+        window.saveDB = function() { set(dbRef, window.db); };
         window.getDeviceId = function() { let id = localStorage.getItem('WA_SYS_DEV_ID'); if(!id) { id = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase(); localStorage.setItem('WA_SYS_DEV_ID', id); } return id; }
         
         window.formatDateDDMMYYYY = function(dateString) {
@@ -145,7 +108,9 @@
 
         window.updateSystemClock = function() {
             const clk = document.getElementById('systemClock');
-            if(clk) { clk.innerText = new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date()); }
+            if(clk) {
+                clk.innerText = new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date());
+            }
         };
         setInterval(window.updateSystemClock, 1000);
 
@@ -154,13 +119,20 @@
         window.getDayNameFromDate = function(dateString) { if (!dateString) return ''; return new Intl.DateTimeFormat('ar-EG', { weekday: 'long' }).format(new Date(dateString)); }
         window.generateVerificationCode = function() { return 'WAC-' + Date.now().toString().slice(-4) + '-' + Math.random().toString(36).substring(2, 5).toUpperCase(); }
 
+        window.logSystemActivity = function(type, details, userFull = 'مجهول', role = 'غير مصرح') {
+            if(!window.db.activities) window.db.activities = [];
+            window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: 'SYSTEM', username: 'system', userFullName: userFull, userRole: role, type: type, details: details, deviceId: window.getDeviceId(), ip: window.clientIP, isHidden: false });
+            window.saveDB();
+        }
+
         window.logActivity = function(type, details) {
-            if (!window.currentUser || !window.db) return;
+            if (!window.currentUser) return;
             if(!window.db.activities) window.db.activities = [];
             window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: window.currentUser.id, username: window.currentUser.username, userFullName: window.currentUser.fullName, userRole: window.currentUser.role, type: type, details: details, deviceId: window.getDeviceId(), ip: window.clientIP, isHidden: false, hiddenByUsername: null, hiddenByFullName: null });
             window.saveDB();
         }
 
+        // دالة إضافة النقاط - تمنع إضافة نقاط لمدير النظام
         window.addPoint = function(reason) {
             if (!window.currentUser || window.currentUser.role === 'مدير نظام') return; 
             const u = window.db.users.find(x => x.id === window.currentUser.id);
@@ -170,65 +142,35 @@
         window.updateUserPointsDisplay = function() {
             const ptsElem = document.getElementById('userPointsBadge');
             if (ptsElem && window.currentUser) {
-                if (window.currentUser.role === 'مدير نظام') ptsElem.innerText = `مدير نظام (بدون نقاط)`;
-                else ptsElem.innerText = `🏅 النقاط: ${window.currentUser.points || 0}`;
+                if (window.currentUser.role === 'مدير نظام') {
+                    ptsElem.innerText = `مدير نظام (بدون نقاط)`;
+                } else {
+                    ptsElem.innerText = `🏅 النقاط: ${window.currentUser.points || 0}`;
+                }
             }
-        }
-
-        window.getHTMLLogin = function() {
-            return `
-                <div id="loginView" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-950 w-full">
-                    <div class="absolute inset-0 opacity-10 bg-[radial-gradient(#c5a059_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                    <div class="max-w-md w-full bg-slate-900/90 border border-amber-500/30 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10">
-                        <div class="text-center mb-8">
-                            <img src="logo.png" alt="شعار المحكمة" class="protected-logo w-24 h-24 mx-auto mb-4 object-contain" oncontextmenu="return false;" draggable="false">
-                            <h1 class="text-2xl font-black text-amber-400 mb-1">جمهورية مصر العربية</h1>
-                            <h2 class="text-xl font-bold text-slate-100 mb-1">وزارة العدل</h2>
-                            <p class="text-amber-500/90 text-sm font-semibold">محكمة القاهرة الاقتصادية</p>
-                            <p class="text-xs text-slate-400 mt-1">نظام إدارة هيئة التحضير والوساطة</p>
-                        </div>
-                        <form onsubmit="handleLogin(event)" class="space-y-5">
-                            <div><label class="block text-xs font-medium text-slate-300 mb-1.5">اسم المستخدم (Username) أو الإيميل</label><input type="text" id="loginUsername" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm" dir="ltr"></div>
-                            <div><label class="block text-xs font-medium text-slate-300 mb-1.5">كلمة المرور</label><input type="password" id="loginPassword" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm"></div>
-                            <div id="loginError" class="hidden text-rose-500 text-xs font-bold text-center bg-rose-500/10 p-2 rounded border border-rose-500/30"></div>
-                            <button type="submit" id="btnLogin" class="w-full gold-gradient text-slate-950 font-bold py-3 rounded-lg shadow-lg hover:brightness-110 text-sm transition-all">تسجيل الدخول للنظام</button>
-                        </form>
-                    </div>
-                </div>`;
-        }
-
-        window.getHTMLFirstLogin = function() {
-            return `
-                <div id="firstLoginModal" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-950 w-full">
-                    <div class="absolute inset-0 opacity-10 bg-[radial-gradient(#c5a059_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                    <div class="max-w-md w-full bg-slate-900/90 border border-emerald-500/50 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10">
-                        <div class="text-center mb-6">
-                            <img src="logo.png" alt="الشعار" class="protected-logo w-16 h-16 mx-auto mb-3 object-contain" oncontextmenu="return false;" draggable="false">
-                            <h3 class="text-emerald-400 font-bold text-lg mb-1"><i class="fa-solid fa-shield-halved ml-1"></i> إعداد الحساب الإلزامي</h3>
-                            <p class="text-slate-300 text-xs leading-relaxed">أهلاً بك في أول تسجيل دخول. كإجراء أمني وحماية لبيانات المنظومة، يرجى تحديث بياناتك وتغيير كلمة المرور الافتراضية.</p>
-                        </div>
-                        <form onsubmit="handleFirstLoginSetup(event)" class="space-y-4 text-xs">
-                            <div><label class="text-slate-400 block mb-1">البريد الإلكتروني المخصص للحساب (ثابت)</label><input type="text" disabled value="${window.currentUser.email}" class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-2.5 text-left outline-none cursor-not-allowed" dir="ltr"></div>
-                            <div><label class="text-slate-400 block mb-1">رقم الهاتف الشخصي (للتواصل)</label><input type="tel" id="flPhone" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2.5 outline-none focus:border-emerald-500"></div>
-                            <div><label class="text-slate-300 block mb-1">كلمة المرور الجديدة (إلزامية، 6 أحرف كحد أدنى)</label><input type="password" id="flPass" required minlength="6" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2.5 outline-none focus:border-emerald-500" placeholder="أدخل كلمة مرور قوية..."></div>
-                            <div id="flError" class="hidden text-rose-500 text-xs font-bold text-center bg-rose-500/10 p-2 rounded border border-rose-500/30"></div>
-                            <button type="submit" id="btnFL" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg shadow-lg transition-all mt-4">حفظ البيانات ودخول النظام</button>
-                        </form>
-                    </div>
-                </div>`;
         }
 
         window.renderMainLayout = function() {
             document.getElementById('app').innerHTML = `
-                <div id="appContainer" class="flex-grow flex flex-col w-full">
+                <div id="loginView" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-950">
+                    <div class="absolute inset-0 opacity-10 bg-[radial-gradient(#c5a059_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                    <div class="max-w-md w-full bg-slate-900/90 border border-amber-500/30 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10">
+                        <div class="text-center mb-8"><h1 class="text-2xl font-black text-amber-400 mb-1">جمهورية مصر العربية</h1><h2 class="text-xl font-bold text-slate-100 mb-1">وزارة العدل</h2><p class="text-amber-500/90 text-sm font-semibold">محكمة القاهرة الاقتصادية</p><p class="text-xs text-slate-400 mt-1">نظام إدارة هيئة التحضير والوساطة</p></div>
+                        <form onsubmit="handleLogin(event)" class="space-y-5">
+                            <div><label class="block text-xs font-medium text-slate-300 mb-1.5">اسم المستخدم</label><input type="text" id="loginUsername" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm" dir="ltr"></div>
+                            <div><label class="block text-xs font-medium text-slate-300 mb-1.5">كلمة المرور</label><input type="password" id="loginPassword" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm"></div>
+                            <div id="loginError" class="hidden text-rose-500 text-xs font-bold text-center bg-rose-500/10 p-2 rounded border border-rose-500/30"></div>
+                            <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-3 rounded-lg shadow-lg hover:brightness-110 text-sm">تسجيل الدخول للنظام</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div id="appContainer" class="hidden flex-grow flex flex-col">
                     <header class="bg-slate-950 border-b border-amber-500/20 px-6 py-3 no-print sticky top-0 z-50 shadow-lg relative">
                         <div class="max-w-7xl mx-auto flex items-center justify-between">
-                            <div class="w-1/3 flex items-center gap-3">
-                                <img src="logo.png" alt="الشعار" class="protected-logo w-10 h-10 object-contain" oncontextmenu="return false;" draggable="false">
-                                <div>
-                                    <h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1>
-                                    <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة</p>
-                                </div>
+                            <div class="w-1/3">
+                                <h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1>
+                                <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة</p>
                             </div>
                             <div class="w-1/3 flex justify-center text-center">
                                 <div class="bg-slate-900 border border-slate-800 px-5 py-2 rounded-full shadow-inner flex items-center gap-2">
@@ -269,7 +211,7 @@
                     </main>
 
                     <footer class="mt-auto bg-slate-950 border-t border-amber-500/20 py-4 text-center no-print">
-                        <p class="text-sm gold-text font-bold tracking-wider">جميع الحقوق محفوظة لإدارة التحضير والوساطة بمحكمة القاهرة الاقتصادية &copy; ${new Date().getFullYear()}</p>
+                        <p class="text-sm gold-text font-bold tracking-wider">جميع الحقوق محفوظة لهيئة التحضير والوساطة بمحكمة القاهرة الاقتصادية &copy; ${new Date().getFullYear()}</p>
                     </footer>
                 </div>
                 <div id="modalsContainer"></div>
@@ -281,60 +223,43 @@
 
         window.handleLogin = async function(e) {
             e.preventDefault();
-            const btn = document.getElementById('btnLogin'); btn.disabled = true; btn.innerText = 'جاري المصادقة...';
-            const rawInput = document.getElementById('loginUsername').value.trim();
+            const user = document.getElementById('loginUsername').value.trim();
             const pass = document.getElementById('loginPassword').value;
             const err = document.getElementById('loginError');
             
-            let email = rawInput;
-            if (rawInput.toLowerCase() === 'admin') {
-                email = 'mostafa.elshenawy@gmail.com';
-            } else if (!rawInput.includes('@')) {
-                email = rawInput + '@eecourts.gov.eg';
-            }
-
-            try {
-                await signInWithEmailAndPassword(auth, email, pass);
-            } catch (error) {
-                err.innerText = 'بيانات الدخول غير صحيحة أو الحساب غير موجود!';
-                err.classList.remove('hidden');
-                btn.disabled = false; btn.innerText = 'تسجيل الدخول للنظام';
-            }
-        }
-
-        window.handleFirstLoginSetup = async function(e) {
-            e.preventDefault();
-            const btn = document.getElementById('btnFL'); btn.disabled = true; btn.innerText = 'جاري التحديث...';
-            const err = document.getElementById('flError'); err.classList.add('hidden');
-            const newPass = document.getElementById('flPass').value;
-            const phone = document.getElementById('flPhone').value.trim();
+            const hashedInput = await window.hashPassword(pass);
+            const foundUser = window.db.users.find(u => u.username.toLowerCase() === user.toLowerCase());
             
-            try {
-                await updatePassword(auth.currentUser, newPass);
-                const u = window.db.users.find(x => x.id === window.currentUser.id);
-                u.phone = phone;
-                u.isFirstLogin = false;
-                window.currentUser = u;
-                window.saveDB();
-                window.logActivity('تحديث أمني', 'تم استكمال البيانات الإلزامية وتغيير كلمة المرور الافتراضية');
+            if (foundUser && (foundUser.password === hashedInput || foundUser.password === pass)) {
+                if (foundUser.password === pass) {
+                    foundUser.password = hashedInput; 
+                    window.saveDB();
+                }
+                window.currentUser = foundUser;
+                window.logActivity('تسجيل دخول', 'تسجيل دخول ناجح للنظام');
                 
-                document.getElementById('app').innerHTML = ''; 
-                window.renderMainLayout();
+                document.getElementById('loginView').classList.add('hidden');
+                document.getElementById('appContainer').classList.remove('hidden');
                 document.getElementById('navUserName').innerText = window.currentUser.fullName;
                 document.getElementById('navUserRole').innerText = window.currentUser.role;
                 window.updateUserPointsDisplay();
                 window.setupPermissions(); 
                 window.switchTab('cases');
-            } catch (error) {
-                err.innerText = 'حدث خطأ أثناء تغيير كلمة المرور: ' + error.message;
+            } else {
+                window.logSystemActivity('محاولة دخول غير مشروعة', `فشل تسجيل الدخول باسم: ${user}`);
+                err.innerText = 'بيانات الدخول غير صحيحة!';
                 err.classList.remove('hidden');
-                btn.disabled = false; btn.innerText = 'حفظ البيانات ودخول النظام';
             }
         }
 
-        window.logout = async function() { 
+        window.logout = function() { 
             window.logActivity('تسجيل خروج', 'تسجيل خروج من النظام'); 
-            await signOut(auth);
+            window.currentUser = null; 
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
+            document.getElementById('loginError').classList.add('hidden');
+            document.getElementById('appContainer').classList.add('hidden');
+            document.getElementById('loginView').classList.remove('hidden'); 
         }
 
         window.setupPermissions = function() {
@@ -470,14 +395,14 @@
             `;
             document.getElementById('view-users').innerHTML = `
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 flex flex-wrap justify-between items-center shadow-md gap-4">
-                    <h3 class="font-bold text-amber-400"><i class="fa-solid fa-users-gear ml-1"></i> إدارة الحسابات الأمنية</h3>
+                    <h3 class="font-bold text-amber-400"><i class="fa-solid fa-users-gear ml-1"></i> إدارة الحسابات والبيانات</h3>
                     <div class="flex gap-2">
                         <button onclick="exportData('word')" class="bg-blue-700 hover:bg-blue-600 text-white px-3 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-word ml-1"></i> تصدير Word</button>
                         <button onclick="exportData('excel')" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-csv ml-1"></i> تصدير Excel</button>
-                        <button onclick="openUserModal()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-user-plus ml-1"></i> إنشاء حساب مؤمن</button>
+                        <button onclick="openUserModal()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-user-plus ml-1"></i> إضافة حساب</button>
                     </div>
                 </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">اسم الدخول / الإيميل</th><th class="p-3">الاسم الكامل</th><th class="p-3">الصفة</th><th class="p-3">النقاط</th><th class="p-3 text-center">الإجراءات</th></tr></thead><tbody id="usersTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">حساب الدخول</th><th class="p-3">الاسم الكامل</th><th class="p-3">الصفة</th><th class="p-3">النقاط</th><th class="p-3">تاريخ الإضافة</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="usersTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
                 <div id="adminConfigSection" class="bg-slate-900 border border-slate-800 rounded-xl p-6 hidden">
                     <h3 class="text-sm font-bold text-amber-400 mb-3"><i class="fa-solid fa-envelope-open-text ml-1"></i> إدارة قالب الرسالة التوعوية (الرسالة الثانية)</h3>
                     <textarea id="adminMsg2" rows="5" class="w-full bg-slate-800 border border-slate-700 rounded p-3 text-xs text-white mb-3 outline-none focus:border-amber-500"></textarea>
@@ -507,9 +432,8 @@
                         <form onsubmit="saveProfile(event)" class="space-y-4 text-xs">
                             <div><label class="text-slate-400 block mb-1">الاسم (مغلق)</label><input type="text" id="profFullName" disabled class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-2 cursor-not-allowed"></div>
                             <div><label class="text-slate-400 block mb-1">الصفة الوظيفية (مغلق)</label><input type="text" id="profRole" disabled class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-2 cursor-not-allowed"></div>
-                            <div><label class="text-slate-300 block mb-1">رقم الهاتف</label><input type="tel" id="profPhone" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"></div>
+                            <div><label class="text-slate-300 block mb-1">البريد الإلكتروني (@eecourts.gov.eg)</label><input type="text" id="profEmail" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 text-left outline-none focus:border-amber-500" dir="ltr"></div>
                             <div><label class="text-slate-300 block mb-1">كلمة المرور الجديدة (أتركها فارغة إذا لم ترد التغيير)</label><input type="password" id="profPass" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" placeholder="••••••••"></div>
-                            <div id="profError" class="hidden text-rose-500 text-xs font-bold text-center bg-rose-500/10 p-2 rounded border border-rose-500/30"></div>
                             <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-2.5 rounded hover:brightness-110 transition-all mt-2">حفظ التعديلات</button>
                         </form>
                     </div>
@@ -525,15 +449,14 @@
                 </div>
                 <div id="userModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
-                        <div class="flex justify-between items-center mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-shield-halved ml-1"></i> إنشاء حساب مؤمن للموظف</h3><button onclick="closeModal('userModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button></div>
+                        <div class="flex justify-between items-center mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-user-shield ml-1"></i> بيانات حساب الموظف</h3><button onclick="closeModal('userModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button></div>
                         <form onsubmit="saveUser(event)" class="space-y-4 text-xs">
-                            <div class="bg-slate-950 border border-slate-800 p-3 rounded mb-2 text-slate-400 leading-relaxed text-[10px]"><strong>تنبيه أمني:</strong> يتم الآن إنشاء حسابات الموظفين بشكل مباشر داخل خوادم جوجل. لا يتم تخزين كلمات المرور نهائياً في قاعدة البيانات.</div>
-                            <div><label class="text-slate-300 block mb-1">اسم الدخول (الإيميل)</label><input type="text" id="uUser" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" dir="ltr" placeholder="مثال: name@eecourts.gov.eg"></div>
+                            <input type="hidden" id="uId">
+                            <div><label class="text-slate-300 block mb-1">اسم الدخول (Username)</label><input type="text" id="uUser" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" dir="ltr"></div>
                             <div><label class="text-slate-300 block mb-1">الاسم الكامل المطابق للهوية</label><input type="text" id="uName" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"></div>
-                            <div><label class="text-slate-300 block mb-1">كلمة المرور الافتراضية</label><input type="password" id="uPass" required minlength="6" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" placeholder="••••••••"></div>
+                            <div><label class="text-slate-300 block mb-1">كلمة المرور</label><input type="password" id="uPass" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" placeholder="••••••••"></div>
                             <div><label class="text-slate-300 block mb-1">الصفة الوظيفية (الصلاحية)</label><select id="uRole" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"><option>أمين سر</option><option>قاضي تحضير</option><option>مدير إدارة</option><option>مدير نظام</option></select></div>
-                            <div id="uError" class="hidden text-rose-500 text-xs font-bold text-center bg-rose-500/10 p-2 rounded border border-rose-500/30"></div>
-                            <button type="submit" id="btnCreateUser" class="w-full gold-gradient text-slate-950 font-bold py-2.5 rounded hover:brightness-110 mt-2 transition-all"><i class="fa-solid fa-server ml-1"></i> تسجيل وإرسال للخادم</button>
+                            <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-2.5 rounded hover:brightness-110 mt-2 transition-all">حفظ واعتماد الحساب</button>
                         </form>
                     </div>
                 </div>
@@ -543,7 +466,7 @@
         window.closeModal = function(id) { document.getElementById(id).classList.add('hidden'); }
 
         window.openLeaderboard = function() {
-            const realUsers = window.db.users.filter(u => u.username !== 'admin' && u.email !== 'mostafa.elshenawy@gmail.com');
+            const realUsers = window.db.users.filter(u => u.username !== 'admin');
             const sorted = [...realUsers].sort((a,b) => (b.points||0) - (a.points||0));
             const tbody = document.getElementById('leaderboardTbody');
             if(sorted.length === 0) tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-slate-500">لا يوجد موظفين للتقييم بعد</td></tr>';
@@ -553,7 +476,7 @@
 
         window.populateDropdowns = function() {
             const du = document.getElementById('dashUser'); const au = document.getElementById('actUser');
-            const usersOpts = `<option value="">الكل (بدون تصفية)</option>` + window.db.users.filter(u => u.username !== 'admin' && u.email !== 'mostafa.elshenawy@gmail.com').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
+            const usersOpts = `<option value="">الكل (بدون تصفية)</option>` + window.db.users.filter(u => u.username !== 'admin').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
             if(du) du.innerHTML = usersOpts; if(au) au.innerHTML = usersOpts;
 
             const cs = document.getElementById('caseSec'); const jg = document.getElementById('schJudge'); const sc = document.getElementById('schSec');
@@ -578,25 +501,17 @@
         window.openProfileModal = function() {
             document.getElementById('profFullName').value = window.currentUser.fullName;
             document.getElementById('profRole').value = window.currentUser.role;
-            document.getElementById('profPhone').value = window.currentUser.phone || '';
+            document.getElementById('profEmail').value = window.currentUser.email ? window.currentUser.email.replace('@eecourts.gov.eg', '') : '';
             document.getElementById('profPass').value = ''; 
             document.getElementById('profileModal').classList.remove('hidden');
         }
         
         window.saveProfile = async function(e) {
-            e.preventDefault(); 
-            const err = document.getElementById('profError'); err.classList.add('hidden');
-            const u = window.db.users.find(x => x.id === window.currentUser.id);
-            u.phone = document.getElementById('profPhone').value; 
+            e.preventDefault(); const u = window.db.users.find(x => x.id === window.currentUser.id);
+            u.email = document.getElementById('profEmail').value + '@eecourts.gov.eg'; 
             const newPass = document.getElementById('profPass').value;
-            
-            try {
-                if(newPass) { await updatePassword(auth.currentUser, newPass); }
-                window.currentUser = u; window.saveDB(); window.closeModal('profileModal'); alert('تم الحفظ بنجاح.');
-            } catch (error) {
-                err.innerText = 'عذراً، يجب تسجيل الخروج والدخول مجدداً لتتمكن من تغيير كلمة المرور لأسباب أمنية.';
-                err.classList.remove('hidden');
-            }
+            if(newPass) { u.password = await window.hashPassword(newPass); }
+            window.currentUser = u; window.saveDB(); window.closeModal('profileModal'); alert('تم الحفظ بنجاح.');
         }
 
         window.handleSaveCase = function(e) {
@@ -620,20 +535,31 @@
             const cIndex = window.db.cases.findIndex(c => c.id === id);
             if(cIndex > -1) {
                 const caseData = window.db.cases[cIndex];
+                
+                // خصم نقطة الإدخال (مع التأكد من عدم المساس بمدير النظام)
                 const u = window.db.users.find(usr => usr.fullName === caseData.creator);
                 if(u && u.points > 0 && u.role !== 'مدير نظام') u.points--;
+
+                // خصم نقاط الرسائل المُرسلة لهذه الدعوى
                 if (caseData.notificationsSent && caseData.notificationsSent.length > 0) {
                     caseData.notificationsSent.forEach(notification => {
                         const senderUser = window.db.users.find(usr => usr.fullName === notification.sender);
                         if (senderUser && senderUser.points > 0 && senderUser.role !== 'مدير نظام') senderUser.points--;
                     });
                 }
+                
+                // النقل للأرشيف السري
                 if(!window.db.deletedCases) window.db.deletedCases = [];
-                caseData.deletedAt = window.getCairoDateTimeString(); caseData.deletedBy = window.currentUser.fullName;
+                caseData.deletedAt = window.getCairoDateTimeString();
+                caseData.deletedBy = window.currentUser.fullName;
                 window.db.deletedCases.unshift(caseData);
+                
+                // إزالة الدعوى من الجدول المباشر
                 window.db.cases.splice(cIndex, 1);
+                
                 window.logActivity('حذف دعوى (صلاحية مدير)', `حذف الدعوى ${caseData.caseNum} وخصم النقاط المرتبطة بها`);
-                window.saveDB(); window.renderCasesTable();
+                window.saveDB();
+                window.renderCasesTable();
             }
         }
 
@@ -756,73 +682,35 @@
         }
         window.deleteSch = function(id) { if(confirm("حذف من الجدول؟")) { window.db.schedules = window.db.schedules.filter(x=>x.id!==id); window.saveDB(); window.renderScheduleTable(); } }
 
-        window.openUserModal = function() {
-            document.getElementById('uUser').value = ''; document.getElementById('uName').value = ''; document.getElementById('uPass').value = ''; 
-            document.getElementById('uError').classList.add('hidden');
+        window.openUserModal = function(id=null) {
+            document.getElementById('uId').value = id || ''; document.getElementById('uUser').value = id ? window.db.users.find(x=>x.id===id).username : ''; document.getElementById('uUser').disabled = !!id;
+            if(id) { const u = window.db.users.find(x=>x.id===id); document.getElementById('uName').value = u.fullName; document.getElementById('uPass').value = ''; document.getElementById('uPass').placeholder = 'اتركه فارغاً إذا لم ترد التغيير'; document.getElementById('uPass').required = false; document.getElementById('uRole').value = u.role; } else { document.getElementById('uName').value = ''; document.getElementById('uPass').value = ''; document.getElementById('uPass').placeholder = '••••••••'; document.getElementById('uPass').required = true; }
             document.getElementById('userModal').classList.remove('hidden');
         }
         
         window.saveUser = async function(e) {
-            e.preventDefault(); 
-            const btn = document.getElementById('btnCreateUser'); btn.disabled = true; btn.innerText = 'جاري الاتصال بجوجل...';
-            const err = document.getElementById('uError'); err.classList.add('hidden');
-            
-            const rawUser = document.getElementById('uUser').value.trim();
-            let email = rawUser;
-            if (!rawUser.includes('@')) {
-                email = rawUser + '@eecourts.gov.eg';
-            }
-            const pass = document.getElementById('uPass').value;
-            const name = document.getElementById('uName').value;
-            const role = document.getElementById('uRole').value;
+            e.preventDefault(); const id = document.getElementById('uId').value;
+            const inputPass = document.getElementById('uPass').value;
+            let finalPass = null;
+            if(inputPass) finalPass = await window.hashPassword(inputPass);
 
-            const existing = window.db.users.find(x => x.email.toLowerCase() === email.toLowerCase());
-            if(existing) { 
-                err.innerText = 'اسم الدخول (الإيميل) مستخدم مسبقاً!'; err.classList.remove('hidden'); 
-                btn.disabled = false; btn.innerText = 'تسجيل وإرسال للخادم'; return; 
+            if(id) {
+                const u = window.db.users.find(x=>x.id===id); u.fullName = document.getElementById('uName').value; u.role = document.getElementById('uRole').value;
+                if(finalPass) u.password = finalPass;
+            } else { 
+                const existing = window.db.users.find(x=>x.username.toLowerCase() === document.getElementById('uUser').value.toLowerCase());
+                if(existing) { alert('اسم الدخول مستخدم مسبقاً!'); return; }
+                window.db.users.push({id:'usr_'+Date.now(), username:document.getElementById('uUser').value, fullName:document.getElementById('uName').value, password:finalPass, role:document.getElementById('uRole').value, email:'', points:0, createdAt:new Date().toISOString()}); 
             }
-
-            try {
-                const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
-                const newUid = userCredential.user.uid;
-                await signOut(secondaryAuth);
-                
-                window.db.users.push({id: newUid, username: rawUser, fullName: name, role: role, email: email, phone: '', points: 0, isFirstLogin: true, createdAt: new Date().toISOString()}); 
-                window.saveDB(); 
-                window.logActivity('إدارة الحسابات', `تم إنشاء حساب جديد للموظف ${name}`);
-                window.closeModal('userModal'); window.renderUsersTable(); window.populateDropdowns();
-                btn.disabled = false; btn.innerText = 'تسجيل وإرسال للخادم';
-            } catch (error) {
-                err.innerText = 'خطأ من السيرفر: ' + error.message; err.classList.remove('hidden');
-                btn.disabled = false; btn.innerText = 'تسجيل وإرسال للخادم';
-            }
+            window.saveDB(); window.closeModal('userModal'); window.renderUsersTable(); window.populateDropdowns();
         }
         
-        window.deleteUser = function(id) {
-            if(!confirm('تأكيد الحذف: هل أنت متأكد من حذف هذا المستخدم نهائياً؟\n(لن يتمكن من تسجيل الدخول للنظام بعد الآن)')) return;
-            window.db.users = window.db.users.filter(u => u.id !== id);
-            window.logActivity('إدارة الحسابات', `تم حذف حساب موظف من النظام`);
-            window.saveDB(); 
-            window.renderUsersTable();
-        }
-
+        window.deleteUser = function(id) { if(!confirm("هل أنت متأكد من حذف هذا المستخدم نهائياً؟")) return; window.db.users = window.db.users.filter(x => x.id !== id); window.saveDB(); window.renderUsersTable(); window.populateDropdowns(); }
+        
         window.renderUsersTable = function() {
-            document.getElementById('usersTbody').innerHTML = window.db.users.map(u => `
-                <tr class="hover:bg-slate-800/60">
-                    <td class="p-3 font-mono font-bold">${u.email}</td>
-                    <td class="p-3">${u.fullName}</td>
-                    <td class="p-3 text-amber-400 font-bold">${u.role}</td>
-                    <td class="p-3 font-mono text-emerald-400 font-bold">🏅 ${u.points||0}</td>
-                    <td class="p-3 text-center flex justify-center items-center h-full">
-                        ${u.email.toLowerCase() === 'mostafa.elshenawy@gmail.com' ? 
-                          `<span class="bg-emerald-900/40 text-emerald-400 px-2 py-1 rounded text-[10px]"><i class="fa-solid fa-shield ml-1"></i> مدير أساسي</span>` : 
-                          `<button onclick="deleteUser('${u.id}')" class="bg-rose-900/50 hover:bg-rose-700 text-rose-300 hover:text-white px-3 py-1.5 rounded text-[10px] transition-colors"><i class="fa-solid fa-trash-can ml-1"></i> حذف</button>`
-                        }
-                    </td>
-                </tr>`).join('');
+            document.getElementById('usersTbody').innerHTML = window.db.users.map(u => `<tr class="hover:bg-slate-800/60"><td class="p-3 font-mono font-bold">${u.username}</td><td class="p-3">${u.fullName}</td><td class="p-3 text-amber-400 font-bold">${u.role}</td><td class="p-3 font-mono text-emerald-400 font-bold">🏅 ${u.points||0}</td><td class="p-3"><span dir="ltr" class="text-slate-400">${window.formatDateDDMMYYYY(u.createdAt.split('T')[0])}</span></td><td class="p-3 text-center"><button onclick="openUserModal('${u.id}')" class="bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white px-2 py-1 rounded text-xs transition-colors"><i class="fa-solid fa-pen"></i></button> ${window.currentUser.role === 'مدير نظام' && u.username !== 'admin' ? `<button onclick="deleteUser('${u.id}')" class="bg-rose-600/20 text-rose-400 hover:bg-rose-600 hover:text-white px-2 py-1 rounded text-xs mr-1 transition-colors"><i class="fa-solid fa-trash-can"></i></button>` : ''}</td></tr>`).join('');
             document.getElementById('adminMsg2').value = window.db.msg2Template;
         }
-        
         window.saveAdminMsg2 = function() { window.db.msg2Template = document.getElementById('adminMsg2').value; window.saveDB(); alert('تم حفظ القالب بنجاح.'); }
 
         let c1, c2;
@@ -838,11 +726,11 @@
             document.getElementById('dashTotalMsgs').innerText = tMsg;
             const mC = cFilter.filter(c => (c.dateStr || '').includes(String(new Date().getMonth()+1).padStart(2,'0')+'/'+new Date().getFullYear())).length;
             document.getElementById('dashMonthCases').innerText = mC;
-            document.getElementById('dashTeamPts').innerText = window.db.users.filter(u => u.username !== 'admin' && u.email !== 'mostafa.elshenawy@gmail.com').reduce((a,b)=>a+(b.points||0),0);
+            document.getElementById('dashTeamPts').innerText = window.db.users.filter(u => u.username !== 'admin').reduce((a,b)=>a+(b.points||0),0);
 
             if(c1) c1.destroy(); if(c2) c2.destroy();
             c1 = new Chart(document.getElementById('chart1').getContext('2d'), { type:'bar', data: { labels:['إجمالي القضايا','رسائل الإخطارات'], datasets:[{label:'العدد', data:[cFilter.length, tMsg], backgroundColor:['#d4af37','#10b981'], borderRadius: 4}] }, options:{responsive:true,maintainAspectRatio:false, plugins:{legend:{labels:{color:'#cbd5e1'}}}, scales:{y:{ticks:{color:'#94a3b8'}, grid:{color:'#334155'}},x:{ticks:{color:'#cbd5e1'}, grid:{display:false}}}} });
-            const realUsers = window.db.users.filter(u => u.username !== 'admin' && u.email !== 'mostafa.elshenawy@gmail.com');
+            const realUsers = window.db.users.filter(u => u.username !== 'admin');
             c2 = new Chart(document.getElementById('chart2').getContext('2d'), { type:'doughnut', data: { labels:realUsers.map(u=>u.fullName), datasets:[{data:realUsers.map(u=>u.points||0), backgroundColor:['#d4af37','#0ea5e9','#10b981','#f43f5e', '#a855f7', '#f97316'], borderWidth: 0}] }, options:{responsive:true,maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{color:'#cbd5e1', font:{family:'Tajawal'}}}}} });
         }
     </script>
