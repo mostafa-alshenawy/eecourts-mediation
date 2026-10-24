@@ -90,7 +90,7 @@
                     if (!window.db.users) window.db.users = [];
                     window.currentUser = window.db.users.find(u => u.email.toLowerCase() === user.email.toLowerCase());
                     
-                    if (!window.currentUser && user.email === 'admin@eecourts.gov.eg') {
+                    if (!window.currentUser && user.email === 'mostafa.elshenawy@gmail.com') {
                         window.currentUser = { id: user.uid, username: 'admin', fullName: 'مدير النظام', role: 'مدير نظام', email: user.email, phone: '01000000000', points: 0, isFirstLogin: false, createdAt: new Date().toISOString() };
                         window.db.users.push(window.currentUser);
                         window.saveDB();
