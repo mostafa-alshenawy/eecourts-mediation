@@ -61,6 +61,7 @@
         window.activeRepTargetField = null;
         window.clientIP = 'جاري التحقق...';
         window.db = null;
+        window.hasLoggedSession = false; 
 
         fetch('https://api.ipify.org?format=json')
             .then(r => r.json())
@@ -90,14 +91,15 @@
                         window.db.users.push(window.currentUser);
                         window.saveDB();
                     } else if (!window.currentUser) {
+                        document.getElementById('loadingScreen').classList.add('hidden');
                         auth.signOut();
                         alert("حسابك غير مسجل في قاعدة بيانات الموظفين.");
                         return;
                     }
 
-                    if (!window.currentUser.sessionLogged) {
+                    if (!window.hasLoggedSession) {
+                        window.hasLoggedSession = true; 
                         window.logActivity('تسجيل دخول', `تسجيل دخول ناجح للنظام`);
-                        window.currentUser.sessionLogged = true; 
                     }
 
                     document.getElementById('loadingScreen').classList.add('hidden');
@@ -115,11 +117,16 @@
                         window.setupPermissions(); 
                         window.switchTab(window.activeTab);
                     }
+                }, (error) => {
+                    document.getElementById('loadingScreen').classList.add('hidden');
+                    alert("عذراً، لا تملك الصلاحية للوصول إلى البيانات أو حدث خطأ في الاتصال.");
+                    auth.signOut();
                 });
             } else {
                 if (dbRef) off(dbRef);
                 window.db = null;
                 window.currentUser = null;
+                window.hasLoggedSession = false;
                 document.getElementById('loadingScreen').classList.add('hidden');
                 document.getElementById('app').innerHTML = window.getHTMLLogin();
                 document.getElementById('app').classList.remove('hidden');
