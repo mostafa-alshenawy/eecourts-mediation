@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>هيئة التحضير والوساطة - محكمة القاهرة الاقتصادية</title>
+    
+    <!-- أيقونة الموقع (Favicon) -->
+    <link rel="icon" href="logo.png" type="image/png">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
@@ -16,10 +20,20 @@
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #d4af37; }
+        
+        /* خصائص الحماية المتقدمة للصور لمنع السحب والحفظ والتفاعل */
+        img.protected-logo {
+            user-drag: none;
+            -webkit-user-drag: none;
+            user-select: none;
+            -webkit-user-select: none;
+            pointer-events: none;
+        }
+
         @media print { .no-print { display: none !important; } body { background: white; color: black; } }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-amber-500 selection:text-slate-900">
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-amber-500 selection:text-slate-900" oncontextmenu="return false;">
 
     <div id="loadingScreen" class="min-h-screen flex flex-col items-center justify-center bg-slate-950 z-50">
         <i class="fa-solid fa-scale-balanced text-amber-500 text-6xl mb-4 animate-bounce"></i>
@@ -132,7 +146,6 @@
             window.saveDB();
         }
 
-        // دالة إضافة النقاط - تمنع إضافة نقاط لمدير النظام
         window.addPoint = function(reason) {
             if (!window.currentUser || window.currentUser.role === 'مدير نظام') return; 
             const u = window.db.users.find(x => x.id === window.currentUser.id);
@@ -154,9 +167,15 @@
             document.getElementById('app').innerHTML = `
                 <div id="loginView" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-950">
                     <div class="absolute inset-0 opacity-10 bg-[radial-gradient(#c5a059_1px,transparent_1px)] [background-size:16px_16px]"></div>
-                    <div class="max-w-md w-full bg-slate-900/90 border border-amber-500/30 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10">
-                        <div class="text-center mb-8"><h1 class="text-2xl font-black text-amber-400 mb-1">جمهورية مصر العربية</h1><h2 class="text-xl font-bold text-slate-100 mb-1">وزارة العدل</h2><p class="text-amber-500/90 text-sm font-semibold">محكمة القاهرة الاقتصادية</p><p class="text-xs text-slate-400 mt-1">نظام إدارة هيئة التحضير والوساطة</p></div>
-                        <form onsubmit="handleLogin(event)" class="space-y-5">
+                    <div class="max-w-md w-full bg-slate-900/90 border border-amber-500/30 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10 text-center">
+                        <!-- الشعار محمي تماماً من التحميـل والسحب -->
+                        <img src="logo.png" alt="شعار المحكمة" class="protected-logo w-24 h-24 mx-auto mb-4 object-contain" oncontextmenu="return false;" draggable="false">
+                        <h1 class="text-2xl font-black text-amber-400 mb-1">جمهورية مصر العربية</h1>
+                        <h2 class="text-xl font-bold text-slate-100 mb-1">وزارة العدل</h2>
+                        <p class="text-amber-500/90 text-sm font-semibold">محكمة القاهرة الاقتصادية</p>
+                        <p class="text-xs text-slate-400 mt-1 mb-6">نظام إدارة هيئة التحضير والوساطة</p>
+                        
+                        <form onsubmit="handleLogin(event)" class="space-y-5 text-right">
                             <div><label class="block text-xs font-medium text-slate-300 mb-1.5">اسم المستخدم</label><input type="text" id="loginUsername" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm" dir="ltr"></div>
                             <div><label class="block text-xs font-medium text-slate-300 mb-1.5">كلمة المرور</label><input type="password" id="loginPassword" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm"></div>
                             <div id="loginError" class="hidden text-rose-500 text-xs font-bold text-center bg-rose-500/10 p-2 rounded border border-rose-500/30"></div>
@@ -168,9 +187,13 @@
                 <div id="appContainer" class="hidden flex-grow flex flex-col">
                     <header class="bg-slate-950 border-b border-amber-500/20 px-6 py-3 no-print sticky top-0 z-50 shadow-lg relative">
                         <div class="max-w-7xl mx-auto flex items-center justify-between">
-                            <div class="w-1/3">
-                                <h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1>
-                                <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة</p>
+                            <div class="w-1/3 flex items-center gap-3">
+                                <!-- الشعار في الشريط العلوي محمي كذلك -->
+                                <img src="logo.png" alt="شعار المحكمة" class="protected-logo w-10 h-10 object-contain" oncontextmenu="return false;" draggable="false">
+                                <div>
+                                    <h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1>
+                                    <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة</p>
+                                </div>
                             </div>
                             <div class="w-1/3 flex justify-center text-center">
                                 <div class="bg-slate-900 border border-slate-800 px-5 py-2 rounded-full shadow-inner flex items-center gap-2">
@@ -536,11 +559,9 @@
             if(cIndex > -1) {
                 const caseData = window.db.cases[cIndex];
                 
-                // خصم نقطة الإدخال (مع التأكد من عدم المساس بمدير النظام)
                 const u = window.db.users.find(usr => usr.fullName === caseData.creator);
                 if(u && u.points > 0 && u.role !== 'مدير نظام') u.points--;
 
-                // خصم نقاط الرسائل المُرسلة لهذه الدعوى
                 if (caseData.notificationsSent && caseData.notificationsSent.length > 0) {
                     caseData.notificationsSent.forEach(notification => {
                         const senderUser = window.db.users.find(usr => usr.fullName === notification.sender);
@@ -548,13 +569,11 @@
                     });
                 }
                 
-                // النقل للأرشيف السري
                 if(!window.db.deletedCases) window.db.deletedCases = [];
                 caseData.deletedAt = window.getCairoDateTimeString();
                 caseData.deletedBy = window.currentUser.fullName;
                 window.db.deletedCases.unshift(caseData);
                 
-                // إزالة الدعوى من الجدول المباشر
                 window.db.cases.splice(cIndex, 1);
                 
                 window.logActivity('حذف دعوى (صلاحية مدير)', `حذف الدعوى ${caseData.caseNum} وخصم النقاط المرتبطة بها`);
