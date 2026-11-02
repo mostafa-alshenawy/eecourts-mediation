@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>هيئة التحضير والوساطة - محكمة القاهرة الاقتصادية</title>
     
-    <!-- أيقونة الموقع (Favicon) -->
     <link rel="icon" href="logo.png" type="image/png">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
     <style>
         body { font-family: 'Tajawal', sans-serif; }
         .gold-gradient { background: linear-gradient(135deg, #c5a059 0%, #dfba73 50%, #9e7d3b 100%); }
@@ -21,15 +24,7 @@
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #d4af37; }
         
-        /* خصائص الحماية المتقدمة للصور لمنع السحب والحفظ والتفاعل */
-        img.protected-logo {
-            user-drag: none;
-            -webkit-user-drag: none;
-            user-select: none;
-            -webkit-user-select: none;
-            pointer-events: none;
-        }
-
+        img.protected-logo { user-drag: none; -webkit-user-drag: none; user-select: none; -webkit-user-select: none; pointer-events: none; }
         @media print { .no-print { display: none !important; } body { background: white; color: black; } }
     </style>
 </head>
@@ -63,8 +58,29 @@
         window.activeTab = 'cases';
         window.currentUser = null;
         window.activeWhatsappContext = null;
-        window.activeRepTargetField = null;
+        window.activeRepTarget = { type: null, index: null };
+        window.pendingExcelFile = null;
+        window.claimantCount = 1;
+        window.defendantCount = 1;
+        
         window.clientIP = 'جاري التحقق...';
+        fetch('https://api64.ipify.org?format=json')
+            .then(r => r.json())
+            .then(d => window.clientIP = d.ip)
+            .catch(() => {
+                fetch('https://cloudflare.com/cdn-cgi/trace')
+                    .then(res => res.text())
+                    .then(data => { const match = data.match(/ip=([\d\.]+)/); if(match && match[1]) window.clientIP = match[1]; })
+                    .catch(() => window.clientIP = 'غير متوفر');
+            });
+        
+        const SECRET_KEY = "EECourts_Mediation_Secure_Key_2026";
+        window.encrypt = function(text) { return text ? CryptoJS.AES.encrypt(text.toString(), SECRET_KEY).toString() : ''; }
+        window.decrypt = function(cipher) { 
+            if(!cipher) return ''; 
+            try { const bytes = CryptoJS.AES.decrypt(cipher, SECRET_KEY); const dec = bytes.toString(CryptoJS.enc.Utf8); return dec || cipher; } 
+            catch(e) { return cipher; }
+        }
 
         window.hashPassword = async function(msg) {
             const msgBuffer = new TextEncoder().encode(msg);
@@ -73,28 +89,22 @@
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         };
 
-        fetch('https://api.ipify.org?format=json')
-            .then(r => r.json())
-            .then(d => window.clientIP = d.ip)
-            .catch(() => window.clientIP = 'غير معروف');
-
         const defaultDB = {
-            users: [
-                { id: 'usr_admin', username: 'admin', password: 'Admin123', fullName: 'مدير النظام', role: 'مدير نظام', gender: 'ذكر', email: 'admin@eecourts.gov.eg', phone: '01000000000', points: 0, createdAt: new Date().toISOString() }
-            ],
+            users: [{ id: 'usr_admin', username: 'admin', password: 'Admin123', fullName: 'مدير النظام', role: 'مدير نظام', email: 'admin@eecourts.gov.eg', phone: '01000000000', points: 0, createdAt: new Date().toISOString() }],
             cases: [], deletedCases: [], representatives: [], schedules: [], activities: [],
-            msg1DefendantTemplate: `السيد/ [اسم المدعى عليه] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعي]، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
-            msg1ClaimantTemplate: `السيد/ [اسم المدعي] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعى عليه]، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
+            msg1DefendantTemplate: `السيد/ [اسم المدعى عليه] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعي] في الدعوى (رقم [رقم الدعوى] اقتصادي القاهرة)، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\n\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
+            msg1ClaimantTemplate: `السيد/ [اسم المدعي] المحترم،\nتهدي إدارةُ الوساطة والتحكيم بمحكمة القاهرة الاقتصادية إلى سيادتكم خالصَ التحية والتقدير،\nنحيطكم علمًا بأنه قد تحدد موعد جلسة للوساطة في النزاع القائم بينكم وبين السيد/ [اسم المدعى عليه] في الدعوى (رقم [رقم الدعوى] اقتصادي القاهرة)، وذلك يوم [اليوم] الموافق [التاريخ] في تمام الساعة [الساعة]، بهدف بذل مساعي الصلح بين الطرفين.\n\nأمين السر المختص: [اسم أمين السر]\nنرجو التكرم بالحضور في الموعد المحدد، مع خالص التمنيات بالتوصل إلى تسوية ودية.\nوتفضلوا بقبول فائق الاحترام والتقدير.`,
             msg2Template: `هيئة التحضير والوساطة بالمحاكم الاقتصادية\n*طريقك لحل نزاعك وديًا*\n\nالرجاء الاطلاع على المزايا والإجراءات للوصول لأفضل تسوية تحفظ حقوقك.`
         };
 
-        window.db = null;
-        let isDBLoaded = false;
+        window.db = null; let isDBLoaded = false;
+        let incompleteExcelCases = [];
 
         onValue(dbRef, (snapshot) => {
             const data = snapshot.val();
-            if (data) window.db = data;
-            else { window.db = defaultDB; set(dbRef, window.db); }
+            if (data) window.db = data; else { window.db = defaultDB; set(dbRef, window.db); }
+
+            if(!window.db.schedules || !Array.isArray(window.db.schedules)) window.db.schedules = [];
 
             if(!isDBLoaded) {
                 isDBLoaded = true;
@@ -105,33 +115,27 @@
                 if(window.currentUser && window.activeTab) {
                     const foundUser = window.db.users.find(u => u.id === window.currentUser.id);
                     if(foundUser) { window.currentUser = foundUser; window.updateUserPointsDisplay(); }
-                    window.switchTab(window.activeTab); 
+                    if(window.activeTab !== 'caseDetails' && window.activeTab !== 'excelStaging') window.switchTab(window.activeTab); 
                 }
             }
         });
 
         window.saveDB = function() { set(dbRef, window.db); };
         window.getDeviceId = function() { let id = localStorage.getItem('WA_SYS_DEV_ID'); if(!id) { id = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase(); localStorage.setItem('WA_SYS_DEV_ID', id); } return id; }
-        
-        window.formatDateDDMMYYYY = function(dateString) {
-            if (!dateString) return '';
-            const parts = dateString.split('-'); 
-            if(parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
-            return dateString;
-        }
-
-        window.updateSystemClock = function() {
-            const clk = document.getElementById('systemClock');
-            if(clk) {
-                clk.innerText = new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date());
-            }
-        };
+        window.formatDateDDMMYYYY = function(dateString) { if (!dateString) return ''; const parts = dateString.split('-'); if(parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`; return dateString; }
+        window.updateSystemClock = function() { const clk = document.getElementById('systemClock'); if(clk) clk.innerText = new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date()); };
         setInterval(window.updateSystemClock, 1000);
-
         window.getCairoDateTimeString = function() { return new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date()); }
         window.formatArabicTime = function(timeString) { if (!timeString) return ''; const [hours, minutes] = timeString.split(':'); let h = parseInt(hours, 10); const ampm = h >= 12 ? 'مساءً' : 'صباحاً'; h = h % 12 || 12; return `${h}:${minutes} ${ampm}`; }
         window.getDayNameFromDate = function(dateString) { if (!dateString) return ''; return new Intl.DateTimeFormat('ar-EG', { weekday: 'long' }).format(new Date(dateString)); }
         window.generateVerificationCode = function() { return 'WAC-' + Date.now().toString().slice(-4) + '-' + Math.random().toString(36).substring(2, 5).toUpperCase(); }
+
+        window.isPastDate = function(dateString) {
+            if(!dateString) return false;
+            const selected = new Date(dateString); selected.setHours(0,0,0,0);
+            const today = new Date(); today.setHours(0,0,0,0);
+            return selected < today;
+        }
 
         window.logSystemActivity = function(type, details, userFull = 'مجهول', role = 'غير مصرح') {
             if(!window.db.activities) window.db.activities = [];
@@ -142,25 +146,67 @@
         window.logActivity = function(type, details) {
             if (!window.currentUser) return;
             if(!window.db.activities) window.db.activities = [];
-            window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: window.currentUser.id, username: window.currentUser.username, userFullName: window.currentUser.fullName, userRole: window.currentUser.role, type: type, details: details, deviceId: window.getDeviceId(), ip: window.clientIP, isHidden: false, hiddenByUsername: null, hiddenByFullName: null });
+            window.db.activities.unshift({ id: 'act_' + Date.now(), timestamp: new Date().toISOString(), cairoTime: window.getCairoDateTimeString(), userId: window.currentUser.id, username: window.currentUser.username, userFullName: window.currentUser.fullName, userRole: window.currentUser.role, type: type, details: details, deviceId: window.getDeviceId(), ip: window.clientIP, isHidden: false, hiddenByFullName: null });
             window.saveDB();
         }
 
-        window.addPoint = function(reason) {
+        window.addPoints = function(points) {
             if (!window.currentUser || window.currentUser.role === 'مدير نظام') return; 
             const u = window.db.users.find(x => x.id === window.currentUser.id);
-            if (u) { u.points = (u.points || 0) + 1; window.currentUser.points = u.points; window.saveDB(); window.updateUserPointsDisplay(); }
+            if (u) { u.points = (u.points || 0) + points; window.currentUser.points = u.points; window.saveDB(); window.updateUserPointsDisplay(); }
         }
 
         window.updateUserPointsDisplay = function() {
             const ptsElem = document.getElementById('userPointsBadge');
             if (ptsElem && window.currentUser) {
-                if (window.currentUser.role === 'مدير نظام') {
-                    ptsElem.innerText = `مدير نظام (بدون نقاط)`;
-                } else {
-                    ptsElem.innerText = `🏅 النقاط: ${window.currentUser.points || 0}`;
-                }
+                ptsElem.innerText = window.currentUser.role === 'مدير نظام' ? `مدير نظام` : `🏅 النقاط: ${window.currentUser.points || 0}`;
             }
+        }
+        
+        window.togglePass = function(id) { const el = document.getElementById(id); el.type = el.type === 'password' ? 'text' : 'password'; }
+
+        window.autoSaveEntity = function(name, phone, creatorName = 'تلقائي') {
+            if(!name || !phone) return;
+            if(name.match(/(شركة|بنك|مؤسسة|جمعية|هيئة)/i)) {
+                if(!window.db.representatives) window.db.representatives = [];
+                const exists = window.db.representatives.find(r => r.phone === phone);
+                if(!exists) { window.db.representatives.push({ id: Date.now() + Math.random(), entity: name, name: 'ممثل قانوني', phone: phone, creator: creatorName }); }
+            }
+        }
+
+        // Export data to Excel/Word supporting multiple claimants
+        window.exportData = function(type) {
+            if(type === 'excel') {
+                let csv = '\ufeffرقم الدعوى,المدعين,أرقام هواتف المدعين,المدعى عليهم,أرقام هواتف المدعى عليهم,أمين السر,تاريخ الجلسة,وقت الجلسة,مدخل البيانات\n';
+                (window.db.cases || []).forEach(c => {
+                    let claimantsList = c.claimants ? c.claimants.map(cl => ({name: window.decrypt(cl.name), phone: window.decrypt(cl.phone)})) : (c.claimant ? [{name: window.decrypt(c.claimant), phone: window.decrypt(c.claimantPhone)}] : []);
+                    let clNames = claimantsList.map(cl => cl.name).join(' - ');
+                    let clPhones = claimantsList.map(cl => cl.phone).join(' - ');
+                    
+                    let defsList = c.defendants ? c.defendants.map(d => ({name: window.decrypt(d.name), phone: window.decrypt(d.phone)})) : (c.defendant ? [{name: window.decrypt(c.defendant), phone: window.decrypt(c.defendantPhone)}] : []);
+                    let defNames = defsList.map(d => d.name).join(' - ');
+                    let defPhones = defsList.map(d => d.phone).join(' - ');
+
+                    csv += `${c.caseNum},${clNames},${clPhones},${defNames},${defPhones},${c.secretaryName},${c.dateStr},${c.timeStr},${c.creator}\n`;
+                });
+                let blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+                let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `سجل_قضايا_الوساطة_${new Date().getTime()}.csv`; a.click();
+            } else if(type === 'word') {
+                let html = "<html dir='rtl'><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;'><h2 style='text-align:center;'>سجل القضايا المجدولة - إدارة التحضير والوساطة</h2><br><table border='1' cellpadding='5' style='border-collapse:collapse;width:100%;text-align:right;'><tr><th>رقم الدعوى</th><th>المدعين</th><th>المدعى عليهم</th><th>أمين السر</th><th>تاريخ الجلسة</th></tr>";
+                (window.db.cases || []).forEach(c => {
+                    let claimantsList = c.claimants ? c.claimants.map(cl => ({name: window.decrypt(cl.name), phone: window.decrypt(cl.phone)})) : (c.claimant ? [{name: window.decrypt(c.claimant), phone: window.decrypt(c.claimantPhone)}] : []);
+                    let clNames = claimantsList.map(cl => cl.name).join('<br>');
+                    
+                    let defsList = c.defendants ? c.defendants.map(d => ({name: window.decrypt(d.name), phone: window.decrypt(d.phone)})) : (c.defendant ? [{name: window.decrypt(c.defendant), phone: window.decrypt(c.defendantPhone)}] : []);
+                    let defNames = defsList.map(d => d.name).join('<br>');
+                    
+                    html += `<tr><td>${c.caseNum}</td><td>${clNames}</td><td>${defNames}</td><td>${c.secretaryName}</td><td>${c.dateStr}</td></tr>`;
+                });
+                html += "</table><br><p style='text-align:center;font-size:12px;'>جميع حقوق الملكية الفكرية محفوظة لهيئة التحضير والوساطة بمحكمة القاهرة الاقتصادية</p></body></html>";
+                let blob = new Blob(['\ufeff', html], {type: 'application/msword'});
+                let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `تقرير_قضايا_الوساطة_${new Date().getTime()}.doc`; a.click();
+            }
+            window.logActivity('تصدير بيانات', `تصدير بيانات القضايا بصيغة ${type}`);
         }
 
         window.renderMainLayout = function() {
@@ -168,18 +214,15 @@
                 <div id="loginView" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-slate-950">
                     <div class="absolute inset-0 opacity-10 bg-[radial-gradient(#c5a059_1px,transparent_1px)] [background-size:16px_16px]"></div>
                     <div class="max-w-md w-full bg-slate-900/90 border border-amber-500/30 rounded-2xl p-8 shadow-2xl backdrop-blur-md relative z-10 text-center">
-                        <!-- الشعار محمي تماماً من التحميـل والسحب -->
-                        <img src="logo.png" alt="شعار المحكمة" class="protected-logo w-24 h-24 mx-auto mb-4 object-contain" oncontextmenu="return false;" draggable="false">
+                        <img src="logo.png" alt="شعار المحكمة" class="protected-logo w-24 h-24 mx-auto mb-4 object-contain" oncontextmenu="return false;" draggable="false" onerror="this.style.display='none'">
                         <h1 class="text-2xl font-black text-amber-400 mb-1">جمهورية مصر العربية</h1>
                         <h2 class="text-xl font-bold text-slate-100 mb-1">وزارة العدل</h2>
                         <p class="text-amber-500/90 text-sm font-semibold">محكمة القاهرة الاقتصادية</p>
-                        <p class="text-xs text-slate-400 mt-1 mb-6">نظام إدارة هيئة التحضير والوساطة</p>
-                        
-                        <form onsubmit="handleLogin(event)" class="space-y-5 text-right">
+                        <form onsubmit="handleLogin(event)" class="space-y-5 text-right mt-6">
                             <div><label class="block text-xs font-medium text-slate-300 mb-1.5">اسم المستخدم</label><input type="text" id="loginUsername" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm" dir="ltr"></div>
-                            <div><label class="block text-xs font-medium text-slate-300 mb-1.5">كلمة المرور</label><input type="password" id="loginPassword" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm"></div>
+                            <div class="relative"><label class="block text-xs font-medium text-slate-300 mb-1.5">كلمة المرور</label><input type="password" id="loginPassword" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-sm"><i class="fa-solid fa-eye absolute left-3 top-9 cursor-pointer text-slate-400 hover:text-white" onclick="togglePass('loginPassword')"></i></div>
                             <div id="loginError" class="hidden text-rose-500 text-xs font-bold text-center bg-rose-500/10 p-2 rounded border border-rose-500/30"></div>
-                            <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-3 rounded-lg shadow-lg hover:brightness-110 text-sm">تسجيل الدخول للنظام</button>
+                            <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-3 rounded-lg shadow-lg hover:brightness-110 text-sm">تسجيل الدخول</button>
                         </form>
                     </div>
                 </div>
@@ -188,18 +231,11 @@
                     <header class="bg-slate-950 border-b border-amber-500/20 px-6 py-3 no-print sticky top-0 z-50 shadow-lg relative">
                         <div class="max-w-7xl mx-auto flex items-center justify-between">
                             <div class="w-1/3 flex items-center gap-3">
-                                <!-- الشعار في الشريط العلوي محمي كذلك -->
-                                <img src="logo.png" alt="شعار المحكمة" class="protected-logo w-10 h-10 object-contain" oncontextmenu="return false;" draggable="false">
-                                <div>
-                                    <h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1>
-                                    <p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة</p>
-                                </div>
+                                <img src="logo.png" alt="شعار المحكمة" class="protected-logo w-10 h-10 object-contain" oncontextmenu="return false;" draggable="false" onerror="this.style.display='none'">
+                                <div><h1 class="text-base font-bold text-amber-400 leading-tight">محكمة القاهرة الاقتصادية</h1><p class="text-xs text-slate-400 mb-0.5">هيئة التحضير والوساطة</p></div>
                             </div>
                             <div class="w-1/3 flex justify-center text-center">
-                                <div class="bg-slate-900 border border-slate-800 px-5 py-2 rounded-full shadow-inner flex items-center gap-2">
-                                    <i class="fa-regular fa-clock text-amber-500"></i>
-                                    <span class="text-xs text-emerald-400 font-bold tracking-wide" id="systemClock"></span>
-                                </div>
+                                <div class="bg-slate-900 border border-slate-800 px-5 py-2 rounded-full shadow-inner flex items-center gap-2"><i class="fa-regular fa-clock text-amber-500"></i><span class="text-xs text-emerald-400 font-bold tracking-wide" id="systemClock"></span></div>
                             </div>
                             <div class="w-1/3 flex items-center justify-end gap-3">
                                 <button onclick="openLeaderboard()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded shadow flex items-center gap-1 transition-all"><i class="fa-solid fa-ranking-star"></i> <span class="hidden sm:inline">لوحة الشرف</span></button>
@@ -213,7 +249,7 @@
 
                     <nav class="bg-slate-900 border-b border-slate-800 px-6 py-2 shadow-md no-print">
                         <div class="max-w-7xl mx-auto flex flex-wrap gap-2 text-xs font-bold">
-                            <button id="tab-cases" onclick="switchTab('cases')" class="tab-btn px-4 py-2 rounded-lg bg-amber-600 text-white transition-colors"><i class="fa-solid fa-folder-open ml-1"></i> القضايا والرسائل</button>
+                            <button id="tab-cases" onclick="switchTab('cases')" class="tab-btn px-4 py-2 rounded-lg text-slate-300 transition-colors"><i class="fa-solid fa-folder-open ml-1"></i> القضايا والرسائل</button>
                             <button id="tab-dashboard" onclick="switchTab('dashboard')" class="tab-btn px-4 py-2 rounded-lg text-slate-300 transition-colors"><i class="fa-solid fa-chart-line ml-1"></i> الداش بورد</button>
                             <button id="tab-representatives" onclick="switchTab('representatives')" class="tab-btn px-4 py-2 rounded-lg text-slate-300 transition-colors"><i class="fa-solid fa-building-columns ml-1"></i> الممثلون</button>
                             <button id="tab-schedule" onclick="switchTab('schedule')" class="tab-btn px-4 py-2 rounded-lg text-slate-300 transition-colors"><i class="fa-solid fa-calendar-days ml-1"></i> جدول العمل</button>
@@ -225,6 +261,8 @@
 
                     <main class="flex-grow max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
                         <section id="view-cases"></section>
+                        <section id="view-caseDetails" class="hidden"></section>
+                        <section id="view-excelStaging" class="hidden"></section>
                         <section id="view-dashboard" class="hidden"></section>
                         <section id="view-representatives" class="hidden"></section>
                         <section id="view-schedule" class="hidden"></section>
@@ -254,10 +292,7 @@
             const foundUser = window.db.users.find(u => u.username.toLowerCase() === user.toLowerCase());
             
             if (foundUser && (foundUser.password === hashedInput || foundUser.password === pass)) {
-                if (foundUser.password === pass) {
-                    foundUser.password = hashedInput; 
-                    window.saveDB();
-                }
+                if (foundUser.password === pass) { foundUser.password = hashedInput; window.saveDB(); }
                 window.currentUser = foundUser;
                 window.logActivity('تسجيل دخول', 'تسجيل دخول ناجح للنظام');
                 
@@ -270,48 +305,69 @@
                 window.switchTab('cases');
             } else {
                 window.logSystemActivity('محاولة دخول غير مشروعة', `فشل تسجيل الدخول باسم: ${user}`);
-                err.innerText = 'بيانات الدخول غير صحيحة!';
-                err.classList.remove('hidden');
+                err.innerText = 'بيانات الدخول غير صحيحة!'; err.classList.remove('hidden');
             }
         }
 
         window.logout = function() { 
             window.logActivity('تسجيل خروج', 'تسجيل خروج من النظام'); 
             window.currentUser = null; 
-            document.getElementById('loginUsername').value = '';
-            document.getElementById('loginPassword').value = '';
-            document.getElementById('loginError').classList.add('hidden');
-            document.getElementById('appContainer').classList.add('hidden');
+            document.getElementById('loginUsername').value = ''; document.getElementById('loginPassword').value = '';
+            document.getElementById('loginError').classList.add('hidden'); document.getElementById('appContainer').classList.add('hidden');
             document.getElementById('loginView').classList.remove('hidden'); 
         }
 
         window.setupPermissions = function() {
-            const role = window.currentUser.role;
-            const isAdmin = role === 'مدير نظام';
+            const role = window.currentUser.role; const isAdmin = role === 'مدير نظام'; const isManager = role === 'مدير إدارة';
             document.getElementById('tab-dashboard').classList.toggle('hidden', role === 'أمين سر');
-            document.getElementById('tab-activity').classList.toggle('hidden', !(isAdmin || role === 'مدير إدارة'));
+            document.getElementById('tab-activity').classList.toggle('hidden', !(isAdmin || isManager));
             document.getElementById('tab-users').classList.toggle('hidden', !isAdmin);
-            document.getElementById('tab-deleted').classList.toggle('hidden', !isAdmin);
+            document.getElementById('tab-deleted').classList.toggle('hidden', !(isAdmin || isManager));
             
-            const adminConfig = document.getElementById('adminConfigSection');
-            if(adminConfig) adminConfig.classList.toggle('hidden', !isAdmin);
+            const adminConfig = document.getElementById('adminConfigSection'); if(adminConfig) adminConfig.classList.toggle('hidden', !isAdmin);
             
-            const sd = document.getElementById('sessionDate');
-            if(sd) sd.min = new Date().toISOString().split('T')[0];
+            const sArea = document.getElementById('scheduleFormArea'); 
+            if(sArea) sArea.classList.toggle('hidden', !(isAdmin || isManager));
+            
+            const sd = document.getElementById('sessionDate'); if(sd) sd.min = new Date().toISOString().split('T')[0];
             window.populateDropdowns();
+        }
+
+        window.populateDropdowns = function() {
+            const jg = document.getElementById('schJudge'); const sc = document.getElementById('schSec');
+            if(jg && sc) {
+                jg.innerHTML = window.db.users.filter(u => (u.role === 'قاضي تحضير' || u.role === 'مدير إدارة')).map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
+                sc.innerHTML = window.db.users.filter(u => u.role === 'أمين سر').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
+            }
+            const cs = document.getElementById('caseSec');
+            if(cs) {
+                if (window.currentUser && window.currentUser.role === 'أمين سر') {
+                    cs.innerHTML = `<option value="${window.currentUser.fullName}">${window.currentUser.fullName}</option>`;
+                    cs.disabled = true; cs.classList.add('bg-slate-950', 'text-slate-500', 'cursor-not-allowed', 'border-slate-800'); cs.classList.remove('bg-slate-800', 'text-white', 'border-slate-700');
+                } else {
+                    cs.innerHTML = window.db.users.filter(u => u.role === 'أمين سر').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
+                    cs.disabled = false; cs.classList.remove('bg-slate-950', 'text-slate-500', 'cursor-not-allowed', 'border-slate-800'); cs.classList.add('bg-slate-800', 'text-white', 'border-slate-700');
+                }
+            }
+            
+            const du = document.getElementById('dashUser'); const au = document.getElementById('actUser');
+            const usersOpts = `<option value="">الكل (بدون تصفية)</option>` + window.db.users.filter(u => u.username !== 'admin').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
+            if(du) du.innerHTML = usersOpts; if(au) au.innerHTML = usersOpts;
         }
 
         window.switchTab = function(tabName) {
             window.activeTab = tabName;
             document.querySelectorAll('.tab-btn').forEach(btn => { btn.classList.remove('bg-amber-600', 'text-white'); btn.classList.add('text-slate-300'); });
-            
             const activeBtn = document.getElementById('tab-' + tabName);
-            if(tabName === 'deleted') activeBtn.classList.add('bg-rose-600', 'text-white');
-            else activeBtn.classList.add('bg-amber-600', 'text-white');
-            activeBtn.classList.remove('text-slate-300', 'text-rose-400');
-
-            ['cases', 'dashboard', 'representatives', 'schedule', 'activity', 'users', 'deleted'].forEach(t => { document.getElementById('view-' + t).classList.add('hidden'); });
-            document.getElementById('view-' + tabName).classList.remove('hidden');
+            if(activeBtn) {
+                if(tabName === 'deleted') activeBtn.classList.add('bg-rose-600', 'text-white');
+                else activeBtn.classList.add('bg-amber-600', 'text-white');
+                activeBtn.classList.remove('text-slate-300', 'text-rose-400');
+            }
+            ['cases', 'dashboard', 'representatives', 'schedule', 'activity', 'users', 'deleted', 'caseDetails', 'excelStaging'].forEach(t => { 
+                const el = document.getElementById('view-' + t); if(el) el.classList.add('hidden'); 
+            });
+            const v = document.getElementById('view-' + tabName); if(v) v.classList.remove('hidden');
 
             if (tabName === 'cases') window.renderCasesTable();
             if (tabName === 'dashboard') window.renderDashboard();
@@ -322,39 +378,88 @@
             if (tabName === 'deleted') window.renderDeletedTable();
         }
 
+        window.updateYearDefault = function() {
+            const type = document.getElementById('caseYearType').value;
+            document.getElementById('caseYear').value = type === 'ميلادي' ? new Date().getFullYear() : '20 ق';
+        }
+
+        // Add Dynamic Claimant Field
+        window.addClaimantField = function() {
+            const container = document.getElementById('claimantsContainer');
+            const div = document.createElement('div'); div.className = 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 p-3 bg-slate-950 rounded border border-slate-800';
+            const idx = window.claimantCount++;
+            div.innerHTML = `
+                <div><label class="block text-slate-300 mb-1">اسم مدعي آخر <button type="button" onclick="openRepModal('claimant', ${idx})" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" class="claimant-name w-full bg-slate-800 rounded p-2 text-white" required id="claimantName_${idx}"></div>
+                <div><label class="block text-slate-300 mb-1">هاتف المدعي الآخر</label><input type="tel" class="claimant-phone w-full bg-slate-800 rounded p-2 text-white" required id="claimantPhone_${idx}"></div>
+            `;
+            container.appendChild(div);
+        }
+
+        // Add Dynamic Defendant Field
+        window.addDefendantField = function() {
+            const container = document.getElementById('defendantsContainer');
+            const div = document.createElement('div'); div.className = 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 p-3 bg-slate-950 rounded border border-slate-800';
+            const idx = window.defendantCount++;
+            div.innerHTML = `
+                <div><label class="block text-slate-300 mb-1">اسم مدعى عليه إضافي <button type="button" onclick="openRepModal('defendant', ${idx})" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" class="def-name w-full bg-slate-800 rounded p-2 text-white" required id="defendantName_${idx}"></div>
+                <div><label class="block text-slate-300 mb-1">هاتف المدعى عليه الإضافي</label><input type="tel" class="def-phone w-full bg-slate-800 rounded p-2 text-white" required id="defendantPhone_${idx}"></div>
+            `;
+            container.appendChild(div);
+        }
+
         window.buildSectionHTML = function() {
             document.getElementById('view-cases').innerHTML = `
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl mb-6">
-                    <h2 class="text-sm font-bold text-amber-400 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-file-circle-plus"></i> تسجيل دعوى جديدة وتحديد الجلسة</h2>
+                    <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
+                        <h2 class="text-sm font-bold text-amber-400"><i class="fa-solid fa-file-circle-plus"></i> تسجيل دعوى جديدة وتحديد الجلسة</h2>
+                        <div class="flex items-center gap-2">
+                            <label class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded shadow cursor-pointer text-xs font-bold transition-all">
+                                <i class="fa-solid fa-file-excel ml-1"></i> استيراد من ملف إكسيل
+                                <input type="file" id="excelUpload" accept=".xlsx, .xls" class="hidden" onchange="triggerExcelUploadModal(event)">
+                            </label>
+                        </div>
+                    </div>
                     <form onsubmit="handleSaveCase(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
                         <div><label class="block text-slate-300 mb-1">رقم الدعوى</label><input type="number" id="caseNum" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></div>
-                        <div><label class="block text-slate-300 mb-1">سنة الدعوى</label><input type="number" id="caseYear" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white" value="${new Date().getFullYear()}"></div>
-                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">تاريخ ووقت الجلسة</label>
-                            <div class="flex gap-2">
-                                <input type="date" id="sessionDate" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white">
-                                <input type="time" id="sessionTime" required value="10:00" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white">
+                        <div><label class="block text-slate-300 mb-1">نوع السنة</label><select id="caseYearType" onchange="updateYearDefault()" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"><option value="ميلادي">ميلادي</option><option value="قضائي">قضائي</option></select></div>
+                        <div><label class="block text-slate-300 mb-1">سنة الدعوى</label><input type="text" id="caseYear" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white" value="${new Date().getFullYear()}"></div>
+                        <div><label class="block text-slate-300 mb-1">أمين السر المختص</label><select id="caseSec" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></select></div>
+                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">تاريخ الجلسة</label><input type="date" id="sessionDate" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></div>
+                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">وقت الجلسة</label><input type="time" id="sessionTime" required value="10:00" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></div>
+                        
+                        <!-- Claimants Section -->
+                        <div class="md:col-span-4" id="claimantsContainer">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div><label class="block text-slate-300 mb-1">اسم المدعي <button type="button" onclick="openRepModal('claimant', 0)" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" id="claimantName_0" class="claimant-name w-full bg-slate-800 rounded p-2 text-white" required></div>
+                                <div><label class="block text-slate-300 mb-1">هاتف المدعي</label><input type="tel" id="claimantPhone_0" class="claimant-phone w-full bg-slate-800 rounded p-2 text-white" required></div>
                             </div>
                         </div>
-                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">أمين السر المختص</label><select id="caseSec" required class="w-full border border-slate-700 rounded p-2"></select></div>
-                        <div class="md:col-span-2"></div>
-                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">اسم المدعي <button type="button" onclick="openRepModal('claimant')" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" id="claimantName" required class="w-full bg-slate-800 rounded p-2 text-white"></div>
-                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">هاتف المدعي</label><input type="tel" id="claimantPhone" required class="w-full bg-slate-800 rounded p-2 text-white"></div>
-                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">اسم المدعى عليه <button type="button" onclick="openRepModal('defendant')" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" id="defendantName" required class="w-full bg-slate-800 rounded p-2 text-white"></div>
-                        <div class="md:col-span-2"><label class="block text-slate-300 mb-1">هاتف المدعى عليه</label><input type="tel" id="defendantPhone" required class="w-full bg-slate-800 rounded p-2 text-white"></div>
-                        <div class="md:col-span-4 flex justify-end mt-2"><button type="submit" class="gold-gradient text-slate-950 hover:brightness-110 font-bold px-6 py-2 rounded shadow transition-all"><i class="fa-solid fa-plus ml-1"></i> حفظ وتسجيل الدعوى (1 نقطة)</button></div>
+                        <div class="md:col-span-4 mb-2">
+                            <button type="button" onclick="addClaimantField()" class="text-slate-400 hover:text-white border border-slate-700 px-3 py-1.5 rounded transition-colors"><i class="fa-solid fa-user-plus ml-1"></i>إضافة مدعي آخر</button>
+                        </div>
+                        
+                        <!-- Defendants Section -->
+                        <div class="md:col-span-4 border-t border-slate-800 pt-4" id="defendantsContainer">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div><label class="block text-slate-300 mb-1">اسم المدعى عليه <button type="button" onclick="openRepModal('defendant', 0)" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" class="def-name w-full bg-slate-800 rounded p-2 text-white" required id="defendantName_0"></div>
+                                <div><label class="block text-slate-300 mb-1">هاتف المدعى عليه</label><input type="tel" class="def-phone w-full bg-slate-800 rounded p-2 text-white" required id="defendantPhone_0"></div>
+                            </div>
+                        </div>
+                        <div class="md:col-span-4 flex justify-between mt-2">
+                            <button type="button" onclick="addDefendantField()" class="text-slate-400 hover:text-white border border-slate-700 px-3 py-1.5 rounded transition-colors"><i class="fa-solid fa-user-plus ml-1"></i>إضافة مدعى عليه آخر</button>
+                            <button type="submit" class="gold-gradient text-slate-950 hover:brightness-110 font-bold px-6 py-2 rounded shadow transition-all"><i class="fa-solid fa-plus ml-1"></i> حفظ وتسجيل الدعوى (1 نقطة)</button>
+                        </div>
                     </form>
                 </div>
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
-                    <div class="flex justify-between items-center mb-4"><h3 class="text-sm font-bold text-slate-200"><i class="fa-solid fa-list-check ml-1"></i> سجل القضايا المجدولة</h3><input type="text" id="searchCases" onkeyup="renderCasesTable()" class="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-xs text-white w-64 focus:border-amber-500 outline-none transition-colors" placeholder="بحث برقم الدعوى أو كود التوثيق..."></div>
-                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">الدعوى</th><th class="p-3">المدعي</th><th class="p-3">المدعى عليه</th><th class="p-3">الجلسة وأمين السر</th><th class="p-3">مُدخل البيانات</th><th class="p-3">حالة الإخطارات (أكواد التوثيق)</th><th class="p-3 text-center">الإجراءات</th></tr></thead><tbody id="casesTbody" class="divide-y divide-slate-800"></tbody></table></div>
+                    <div class="flex justify-between items-center mb-4"><h3 class="text-sm font-bold text-slate-200"><i class="fa-solid fa-list-check ml-1"></i> سجل القضايا</h3><input type="text" id="searchCases" onkeyup="renderCasesTable()" class="bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-xs text-white w-64 focus:border-amber-500 outline-none transition-colors" placeholder="بحث برقم الدعوى، الأطراف، أو كود الرسالة..."></div>
+                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">الدعوى</th><th class="p-3">المدعين (م)</th><th class="p-3">المدعى عليهم (م)</th><th class="p-3">تاريخ الجلسة</th><th class="p-3 text-center">إجراءات</th></tr></thead><tbody id="casesTbody" class="divide-y divide-slate-800"></tbody></table></div>
                 </div>
             `;
-            document.getElementById('view-deleted').innerHTML = `
-                <div class="bg-slate-900 border border-rose-900/50 rounded-xl p-6 shadow-xl">
-                    <h3 class="text-sm font-bold text-rose-400 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-trash-can-arrow-up ml-1"></i> الأرشيف السري للقضايا المحذوفة</h3>
-                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-rose-400"><tr><th class="p-3">الدعوى</th><th class="p-3">المدعي / المدعى عليه</th><th class="p-3">تاريخ الجلسة</th><th class="p-3">منشئ الدعوى الأصلي</th><th class="p-3">تفاصيل الحذف</th></tr></thead><tbody id="deletedTbody" class="divide-y divide-slate-800"></tbody></table></div>
-                </div>
-            `;
+            
+            document.getElementById('view-caseDetails').innerHTML = `<div id="caseDetailsContent"></div>`;
+            document.getElementById('view-excelStaging').innerHTML = `<div id="excelStagingContent"></div>`;
+            
             document.getElementById('view-dashboard').innerHTML = `
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-lg font-bold text-amber-400"><i class="fa-solid fa-chart-line ml-1"></i> لوحة الإحصائيات (الداش بورد)</h2>
@@ -374,32 +479,12 @@
                     <div class="bg-slate-900 p-5 rounded-xl border border-slate-800 text-center"><p class="text-xs text-slate-400">قضايا الشهر</p><p class="text-2xl font-black text-teal-400 mt-1" id="dashMonthCases">0</p></div>
                     <div class="bg-slate-900 p-5 rounded-xl border border-slate-800 text-center"><p class="text-xs text-slate-400">النقاط الإجمالية</p><p class="text-2xl font-black text-purple-400 mt-1" id="dashTeamPts">0</p></div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="bg-slate-900 p-4 rounded-xl border border-slate-800 h-72"><canvas id="chart1"></canvas></div><div class="bg-slate-900 p-4 rounded-xl border border-slate-800 h-72"><canvas id="chart2"></canvas></div></div>
-            `;
-            document.getElementById('view-representatives').innerHTML = `
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
-                    <h3 class="text-sm font-bold text-amber-400 mb-4"><i class="fa-solid fa-user-plus ml-1"></i> إضافة ممثل قانوني للدفتر</h3>
-                    <form onsubmit="handleSaveRep(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                        <div><label class="block text-slate-300 mb-1">اسم الجهة (شركة/بنك)</label><input type="text" id="repEntity" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></div>
-                        <div><label class="block text-slate-300 mb-1">الممثل القانوني</label><input type="text" id="repName" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></div>
-                        <div><label class="block text-slate-300 mb-1">رقم الهاتف</label><input type="tel" id="repPhone" required class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></div>
-                        <div class="md:col-span-3 text-left mt-2"><button type="submit" class="gold-gradient text-slate-950 hover:brightness-110 font-bold px-6 py-2 rounded shadow transition-all">حفظ ممثل قانوني</button></div>
-                    </form>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 h-72"><canvas id="chart1"></canvas></div>
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 h-72"><canvas id="chart2"></canvas></div>
                 </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">الجهة</th><th class="p-3">الممثل</th><th class="p-3">الهاتف</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="repsTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
             `;
-            document.getElementById('view-schedule').innerHTML = `
-                <div id="scheduleFormArea" class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6">
-                    <h3 class="text-sm font-bold text-amber-400 mb-4"><i class="fa-solid fa-calendar-plus ml-1"></i> توزيع جدول العمل</h3>
-                    <form onsubmit="handleSaveSchedule(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                        <div><label class="block text-slate-300 mb-1">اليوم</label><select id="schDay" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"><option>السبت</option><option>الأحد</option><option>الإثنين</option><option>الثلاثاء</option><option>الأربعاء</option><option>الخميس</option></select></div>
-                        <div><label class="block text-slate-300 mb-1">القاضي</label><select id="schJudge" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></select></div>
-                        <div><label class="block text-slate-300 mb-1">أمين السر</label><select id="schSec" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></select></div>
-                        <div class="md:col-span-3 text-left mt-2"><button type="submit" class="gold-gradient text-slate-950 hover:brightness-110 font-bold px-6 py-2 rounded shadow transition-all">تثبيت بالجدول</button></div>
-                    </form>
-                </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6"><h3 class="text-sm font-bold text-slate-200 mb-4"><i class="fa-solid fa-table ml-1"></i> الجدول المعتمد لك:</h3><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">اليوم</th><th class="p-3">القاضي</th><th class="p-3">أمين السر</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="schTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
-            `;
+
             document.getElementById('view-activity').innerHTML = `
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
                     <div class="flex justify-between items-center mb-6">
@@ -413,9 +498,17 @@
                             <button onclick="exportData('excel')" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-file-csv ml-1"></i> تصدير Excel</button>
                         </div>
                     </div>
-                    <div class="overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">التوقيت</th><th class="p-3">المستخدم</th><th class="p-3">العملية</th><th class="p-3">التفاصيل</th><th class="p-3">الـ IP والجهاز</th><th class="p-3 text-center">التحكم</th></tr></thead><tbody id="activityTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
+                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">التوقيت</th><th class="p-3">المستخدم</th><th class="p-3">التفاصيل</th><th class="p-3 text-center">عنوان الـ IP</th><th class="p-3 text-center">إجراءات العرض</th></tr></thead><tbody id="activityTbody" class="divide-y divide-slate-800"></tbody></table></div>
                 </div>
             `;
+            
+            document.getElementById('view-deleted').innerHTML = `
+                <div class="bg-slate-900 border border-rose-900/50 rounded-xl p-6 shadow-xl">
+                    <h3 class="text-sm font-bold text-rose-400 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-trash-can-arrow-up ml-1"></i> الأرشيف السري للقضايا المحذوفة</h3>
+                    <div class="overflow-x-auto"><table class="w-full text-right text-xs text-slate-300"><thead class="bg-slate-950 text-rose-400"><tr><th class="p-3">رقم الدعوى</th><th class="p-3">المدعين / المدعى عليهم</th><th class="p-3">تاريخ الجلسة</th><th class="p-3">تفاصيل الحذف</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="deletedTbody" class="divide-y divide-slate-800"></tbody></table></div>
+                </div>
+            `;
+            
             document.getElementById('view-users').innerHTML = `
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 flex flex-wrap justify-between items-center shadow-md gap-4">
                     <h3 class="font-bold text-amber-400"><i class="fa-solid fa-users-gear ml-1"></i> إدارة الحسابات والبيانات</h3>
@@ -425,61 +518,129 @@
                         <button onclick="openUserModal()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded text-xs font-bold transition-all shadow"><i class="fa-solid fa-user-plus ml-1"></i> إضافة حساب</button>
                     </div>
                 </div>
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">حساب الدخول</th><th class="p-3">الاسم الكامل</th><th class="p-3">الصفة</th><th class="p-3">النقاط</th><th class="p-3">تاريخ الإضافة</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="usersTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
-                <div id="adminConfigSection" class="bg-slate-900 border border-slate-800 rounded-xl p-6 hidden">
-                    <h3 class="text-sm font-bold text-amber-400 mb-3"><i class="fa-solid fa-envelope-open-text ml-1"></i> إدارة قالب الرسالة التوعوية (الرسالة الثانية)</h3>
-                    <textarea id="adminMsg2" rows="5" class="w-full bg-slate-800 border border-slate-700 rounded p-3 text-xs text-white mb-3 outline-none focus:border-amber-500"></textarea>
-                    <button onclick="saveAdminMsg2()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold px-6 py-2 rounded text-xs transition-colors">حفظ التعديلات على القالب</button>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 overflow-x-auto"><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">حساب الدخول</th><th class="p-3">الاسم الكامل</th><th class="p-3">الصفة</th><th class="p-3">النقاط</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="usersTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>
+                <div id="adminConfigSection" class="grid grid-cols-1 md:grid-cols-2 gap-6 hidden">
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                        <h3 class="text-sm font-bold text-amber-400 mb-3"><i class="fa-solid fa-envelope-open-text ml-1"></i> إدارة قالب الرسالة التوعوية</h3>
+                        <textarea id="adminMsg2" rows="5" class="w-full bg-slate-800 border border-slate-700 rounded p-3 text-xs text-white mb-3 outline-none focus:border-amber-500"></textarea>
+                        <button onclick="saveAdminMsg2()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold px-6 py-2 rounded text-xs transition-colors">حفظ التعديلات</button>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                        <h3 class="text-sm font-bold text-amber-400 mb-3"><i class="fa-solid fa-database ml-1"></i> النسخ الاحتياطي (خاص بالمدير)</h3>
+                        <p class="text-xs text-slate-400 mb-4">يمكنك تحميل نسخة كاملة مشفرة من قاعدة البيانات، أو استعادة نسخة سابقة. الرجاء الحذر عند الاستعادة حيث ستستبدل البيانات الحالية.</p>
+                        <div class="flex gap-2">
+                            <button onclick="backupDB()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded text-xs transition-colors shadow"><i class="fa-solid fa-download ml-1"></i> تحميل النسخة الاحتياطية</button>
+                            <label class="bg-rose-700 hover:bg-rose-600 text-white font-bold px-4 py-2 rounded text-xs transition-colors shadow cursor-pointer">
+                                <i class="fa-solid fa-upload ml-1"></i> استعادة البيانات
+                                <input type="file" id="restoreUpload" accept=".json" class="hidden" onchange="restoreDB(event)">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('view-representatives').innerHTML = `<div class="bg-slate-900 border border-slate-800 rounded-xl p-6"><h3 class="text-sm font-bold text-amber-400 mb-4"><i class="fa-solid fa-building-columns ml-1"></i> سجل الممثلين</h3><table class="w-full text-right text-xs"><thead class="bg-slate-950 text-amber-400"><tr><th class="p-3">الجهة</th><th class="p-3">الممثل</th><th class="p-3">الهاتف</th><th class="p-3 text-center">أُضيفت بواسطة</th><th class="p-3 text-center">إجراء</th></tr></thead><tbody id="repsTbody" class="divide-y divide-slate-800 text-slate-300"></tbody></table></div>`;
+            document.getElementById('view-schedule').innerHTML = `
+                <div id="scheduleFormArea" class="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-6 hidden">
+                    <h3 class="text-sm font-bold text-amber-400 mb-4"><i class="fa-solid fa-calendar-plus ml-1"></i> إضافة مهام لجدول العمل</h3>
+                    <form onsubmit="handleSaveSchedule(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                        <div><label class="block text-slate-300 mb-1">اليوم</label><select id="schDay" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"><option>السبت</option><option>الأحد</option><option>الإثنين</option><option>الثلاثاء</option><option>الأربعاء</option><option>الخميس</option></select></div>
+                        <div><label class="block text-slate-300 mb-1">القاضي</label><select id="schJudge" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></select></div>
+                        <div><label class="block text-slate-300 mb-1">أمين السر</label><select id="schSec" class="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"></select></div>
+                        <div class="md:col-span-3 text-left mt-2"><button type="submit" class="gold-gradient text-slate-950 hover:brightness-110 font-bold px-6 py-2 rounded shadow transition-all"><i class="fa-solid fa-plus ml-1"></i> تثبيت بالجدول</button></div>
+                    </form>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                    <h3 class="text-sm font-bold text-slate-200 mb-4"><i class="fa-solid fa-table ml-1"></i> الجدول المعتمد لك:</h3>
+                    <table class="w-full text-right text-xs">
+                        <thead class="bg-slate-950 text-amber-400"><tr><th class="p-3 w-1/4">اليوم</th><th class="p-3 w-1/3">القاضي / المدير</th><th class="p-3 w-1/3">أمين السر</th><th class="p-3 text-center">إجراء</th></tr></thead>
+                        <tbody id="schTbody" class="divide-y divide-slate-800 text-slate-300"></tbody>
+                    </table>
                 </div>
             `;
         }
 
         window.buildModalsHTML = function() {
             document.getElementById('modalsContainer').innerHTML = `
-                <div id="leaderboardModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
-                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
-                        <div class="flex justify-between items-center mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-ranking-star ml-1"></i> لوحة الشرف وترتيب الإنجاز</h3><button onclick="closeModal('leaderboardModal')" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-lg"></i></button></div>
-                        <div class="overflow-y-auto max-h-80"><table class="w-full text-right text-xs"><thead class="text-slate-400 border-b border-slate-800"><tr><th class="py-2">الترتيب</th><th>الاسم</th><th class="text-center">النقاط</th></tr></thead><tbody id="leaderboardTbody" class="divide-y divide-slate-800"></tbody></table></div>
+                <div id="excelDateModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-emerald-500/30 shadow-2xl">
+                        <h3 class="text-emerald-400 font-bold mb-4 text-sm"><i class="fa-solid fa-calendar-check ml-1"></i> تحديد الجلسة المجمعة لملف الإكسيل</h3>
+                        <p class="text-xs text-slate-400 mb-4">سيتم تطبيق هذا التاريخ والوقت على كافة القضايا الموجودة في ملف الإكسيل الذي قمت باختياره.</p>
+                        <div class="mb-4">
+                            <label class="block text-slate-300 mb-1 text-xs">تاريخ الجلسة المجمعة</label>
+                            <input type="date" id="excelSessionDate" class="w-full bg-slate-800 border border-slate-700 p-2 text-white rounded text-sm">
+                        </div>
+                        <div class="mb-6">
+                            <label class="block text-slate-300 mb-1 text-xs">وقت الجلسة</label>
+                            <input type="time" id="excelSessionTime" value="10:00" class="w-full bg-slate-800 border border-slate-700 p-2 text-white rounded text-sm">
+                        </div>
+                        <div class="flex justify-between gap-3">
+                            <button onclick="closeModal('excelDateModal'); document.getElementById('excelUpload').value='';" class="w-1/3 bg-slate-700 hover:bg-slate-600 p-2 rounded text-white text-xs font-bold transition">إلغاء</button>
+                            <button onclick="processExcelUpload()" class="w-2/3 bg-emerald-600 hover:bg-emerald-500 p-2 rounded text-white text-xs font-bold shadow transition"><i class="fa-solid fa-check ml-1"></i> تأكيد وبدء الرفع</button>
+                        </div>
                     </div>
                 </div>
-                <div id="repModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
-                        <div class="flex justify-between items-center mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-address-book ml-1"></i> دفتر جهات الاتصال</h3><button onclick="closeModal('repModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button></div>
-                        <input type="text" id="repSearch" onkeyup="filterRepSearch()" placeholder="بحث باسم الممثل أو الجهة..." class="w-full bg-slate-800 border border-slate-700 text-xs rounded p-2 text-white mb-4 outline-none focus:border-amber-500">
-                        <div id="repList" class="space-y-2 max-h-60 overflow-y-auto pr-1"></div>
-                    </div>
-                </div>
-                <div id="profileModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
-                        <div class="flex justify-between items-center mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-user-pen ml-1"></i> إعدادات الحساب</h3><button onclick="closeModal('profileModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button></div>
-                        <form onsubmit="saveProfile(event)" class="space-y-4 text-xs">
-                            <div><label class="text-slate-400 block mb-1">الاسم (مغلق)</label><input type="text" id="profFullName" disabled class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-2 cursor-not-allowed"></div>
-                            <div><label class="text-slate-400 block mb-1">الصفة الوظيفية (مغلق)</label><input type="text" id="profRole" disabled class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-2 cursor-not-allowed"></div>
-                            <div><label class="text-slate-300 block mb-1">البريد الإلكتروني (@eecourts.gov.eg)</label><input type="text" id="profEmail" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 text-left outline-none focus:border-amber-500" dir="ltr"></div>
-                            <div><label class="text-slate-300 block mb-1">كلمة المرور الجديدة (أتركها فارغة إذا لم ترد التغيير)</label><input type="password" id="profPass" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" placeholder="••••••••"></div>
-                            <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-2.5 rounded hover:brightness-110 transition-all mt-2">حفظ التعديلات</button>
-                        </form>
-                    </div>
-                </div>
+
                 <div id="waModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div class="bg-slate-900 rounded-xl w-full max-w-xl p-6 border border-amber-500/30 shadow-2xl">
                         <div class="flex justify-between items-center mb-4"><h3 class="text-amber-400 font-bold text-sm" id="waTitle"><i class="fa-brands fa-whatsapp ml-1 text-emerald-400"></i> إرسال واتساب</h3><button onclick="closeModal('waModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button></div>
                         <textarea id="waMsg1" rows="7" class="w-full bg-slate-800 border border-slate-700 rounded p-3 text-xs text-white mb-2 outline-none focus:border-emerald-500"></textarea>
-                        <button onclick="executeSendWA(1)" class="bg-emerald-600 hover:bg-emerald-500 w-full py-2.5 text-xs font-bold text-white rounded mb-5 transition-colors shadow-lg"><i class="fa-regular fa-paper-plane ml-1"></i> إرسال إخطار الجلسة الأول (توليد كود + نقطة)</button>
+                        <button onclick="executeSendWA(1)" class="bg-emerald-600 hover:bg-emerald-500 w-full py-2.5 text-xs font-bold text-white rounded mb-5 transition-colors shadow-lg"><i class="fa-regular fa-paper-plane ml-1"></i> إرسال الإخطار</button>
                         <textarea id="waMsg2" rows="3" disabled class="w-full bg-slate-950 border border-slate-800 text-slate-500 rounded p-3 text-xs mb-2 cursor-not-allowed"></textarea>
-                        <button onclick="executeSendWA(2)" class="bg-teal-600 hover:bg-teal-500 w-full py-2.5 text-xs font-bold text-white rounded transition-colors shadow-lg"><i class="fa-solid fa-share-nodes ml-1"></i> إرسال الرسالة التوعوية (توليد كود + نقطة)</button>
+                        <button onclick="executeSendWA(2)" class="bg-teal-600 hover:bg-teal-500 w-full py-2.5 text-xs font-bold text-white rounded transition-colors shadow-lg"><i class="fa-solid fa-share-nodes ml-1"></i> إرسال التوعوية</button>
                     </div>
                 </div>
+                
+                <div id="leaderboardModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
+                        <div class="flex justify-between mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-ranking-star ml-1"></i> لوحة الشرف والنقاط</h3><button onclick="closeModal('leaderboardModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
+                        <div class="max-h-80 overflow-y-auto"><table class="w-full text-right text-xs"><tbody id="leaderboardTbody" class="divide-y divide-slate-800"></tbody></table></div>
+                    </div>
+                </div>
+                
+                <div id="profileModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
+                        <div class="flex justify-between mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-user-gear ml-1"></i> إعدادات الحساب</h3><button onclick="closeModal('profileModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
+                        <form onsubmit="saveProfile(event)" class="space-y-4 text-xs">
+                            <div><label class="block text-slate-300 mb-1">الاسم الكامل</label><input type="text" id="profName" disabled class="w-full p-2 bg-slate-950 text-slate-500 rounded border border-slate-800 cursor-not-allowed"></div>
+                            <div><label class="text-slate-300 block mb-1">البريد الإلكتروني (@eecourts.gov.eg)</label><input type="text" id="profEmail" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 text-left outline-none focus:border-amber-500" dir="ltr"></div>
+                            <div><label class="block text-slate-300 mb-1">تغيير كلمة المرور</label><input type="password" id="profPass" placeholder="اترك الحقل فارغاً إذا لم ترغب بالتغيير" class="w-full p-2 bg-slate-800 text-white rounded border border-slate-700"></div>
+                            <button type="submit" class="w-full gold-gradient py-2 rounded text-slate-900 font-bold shadow transition hover:brightness-110">حفظ التعديلات</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <div id="repModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
+                        <div class="flex justify-between"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-address-book ml-1"></i> الدفتر (جهات الاتصال)</h3><button onclick="closeModal('repModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
+                        <input type="text" id="repSearch" onkeyup="filterRepSearch()" placeholder="بحث باسم الجهة أو الممثل..." class="w-full mt-4 p-2 bg-slate-800 text-white rounded border border-slate-700 text-xs focus:border-amber-500 outline-none">
+                        <div id="repList" class="mt-4 max-h-60 overflow-y-auto pr-1"></div>
+                    </div>
+                </div>
+                
                 <div id="userModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
-                        <div class="flex justify-between items-center mb-4"><h3 class="text-amber-400 font-bold text-sm"><i class="fa-solid fa-user-shield ml-1"></i> بيانات حساب الموظف</h3><button onclick="closeModal('userModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button></div>
+                        <div class="flex justify-between mb-4"><h3 class="text-amber-400 font-bold text-sm" id="userModalTitle">حساب مستخدم</h3><button type="button" onclick="closeModal('userModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
                         <form onsubmit="saveUser(event)" class="space-y-4 text-xs">
                             <input type="hidden" id="uId">
-                            <div><label class="text-slate-300 block mb-1">اسم الدخول (Username)</label><input type="text" id="uUser" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" dir="ltr"></div>
-                            <div><label class="text-slate-300 block mb-1">الاسم الكامل المطابق للهوية</label><input type="text" id="uName" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"></div>
-                            <div><label class="text-slate-300 block mb-1">كلمة المرور</label><input type="password" id="uPass" required class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500" placeholder="••••••••"></div>
-                            <div><label class="text-slate-300 block mb-1">الصفة الوظيفية (الصلاحية)</label><select id="uRole" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 outline-none focus:border-amber-500"><option>أمين سر</option><option>قاضي تحضير</option><option>مدير إدارة</option><option>مدير نظام</option></select></div>
-                            <button type="submit" class="w-full gold-gradient text-slate-950 font-bold py-2.5 rounded hover:brightness-110 mt-2 transition-all">حفظ واعتماد الحساب</button>
+                            <div><label class="block text-slate-300 mb-1">اسم المستخدم (للدخول)</label><input type="text" id="uUser" required placeholder="User_ID" class="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded"></div>
+                            <div><label class="block text-slate-300 mb-1">الاسم الكامل</label><input type="text" id="uName" required placeholder="الاسم ثلاثي" class="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded"></div>
+                            <div><label class="text-slate-300 block mb-1">البريد الإلكتروني (@eecourts.gov.eg)</label><input type="text" id="uEmail" class="w-full bg-slate-800 border border-slate-700 text-white rounded p-2 text-left outline-none focus:border-amber-500" dir="ltr"></div>
+                            <div><label class="block text-slate-300 mb-1">كلمة المرور</label><input type="password" id="uPass" placeholder="••••••••" class="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded"></div>
+                            <div><label class="block text-slate-300 mb-1">الدور والصلاحية</label><select id="uRole" class="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded"><option>أمين سر</option><option>قاضي تحضير</option><option>مدير إدارة</option><option>مدير نظام</option></select></div>
+                            <button type="submit" class="w-full gold-gradient p-2.5 font-bold text-slate-900 rounded shadow">حفظ البيانات</button>
+                        </form>
+                    </div>
+                </div>
+                
+                <div id="editRepModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div class="bg-slate-900 rounded-xl w-full max-w-md p-6 border border-amber-500/30 shadow-2xl">
+                        <div class="flex justify-between mb-4"><h3 class="text-amber-400 font-bold text-sm">تعديل جهة الاتصال</h3><button type="button" onclick="closeModal('editRepModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button></div>
+                        <form onsubmit="saveEditedRep(event)" class="space-y-4 text-xs">
+                            <input type="hidden" id="editRepId">
+                            <div><label class="block text-slate-300 mb-1">اسم الجهة</label><input type="text" id="editRepEntity" required class="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded"></div>
+                            <div><label class="block text-slate-300 mb-1">الممثل القانوني</label><input type="text" id="editRepName" class="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded"></div>
+                            <div><label class="block text-slate-300 mb-1">الهاتف</label><input type="tel" id="editRepPhone" required class="w-full p-2 bg-slate-800 text-white border border-slate-700 rounded"></div>
+                            <button type="submit" class="w-full gold-gradient p-2.5 font-bold text-slate-900 rounded shadow">حفظ التعديلات</button>
                         </form>
                     </div>
                 </div>
@@ -488,158 +649,436 @@
 
         window.closeModal = function(id) { document.getElementById(id).classList.add('hidden'); }
 
+        window.openProfileModal = function() {
+            document.getElementById('profName').value = window.currentUser.fullName;
+            document.getElementById('profEmail').value = window.currentUser.email ? window.currentUser.email.replace('@eecourts.gov.eg', '') : '';
+            document.getElementById('profPass').value = '';
+            document.getElementById('profileModal').classList.remove('hidden');
+        }
+
+        window.saveProfile = async function(e) {
+            e.preventDefault();
+            const pass = document.getElementById('profPass').value;
+            const u = window.db.users.find(x => x.id === window.currentUser.id);
+            if(u) { 
+                u.email = document.getElementById('profEmail').value + '@eecourts.gov.eg';
+                if(pass) {
+                    const h = await window.hashPassword(pass);
+                    u.password = h; alert('تم تغيير كلمة المرور بنجاح'); 
+                }
+                window.currentUser = u;
+                window.saveDB(); 
+            }
+            window.closeModal('profileModal');
+        }
+
         window.openLeaderboard = function() {
-            const realUsers = window.db.users.filter(u => u.username !== 'admin');
-            const sorted = [...realUsers].sort((a,b) => (b.points||0) - (a.points||0));
-            const tbody = document.getElementById('leaderboardTbody');
-            if(sorted.length === 0) tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-slate-500">لا يوجد موظفين للتقييم بعد</td></tr>';
-            else tbody.innerHTML = sorted.map((u, i) => `<tr><td class="py-2 text-amber-400 font-bold">#${i+1}</td><td class="text-white">${u.fullName}<br><span class="text-[10px] text-slate-400">${u.role}</span></td><td class="text-center font-mono font-bold text-emerald-400 text-sm">${u.points||0}</td></tr>`).join('');
+            const tb = document.getElementById('leaderboardTbody');
+            const sorted = window.db.users.filter(u => u.role !== 'مدير نظام').sort((a,b) => (b.points||0) - (a.points||0));
+            tb.innerHTML = sorted.map((u, i) => `
+                <tr class="hover:bg-slate-800/60">
+                    <td class="p-3 text-amber-500 font-bold">${i+1}</td>
+                    <td class="p-3 text-white">${u.fullName}</td>
+                    <td class="p-3 text-slate-400 text-[10px]">${u.role}</td>
+                    <td class="p-3 font-mono text-emerald-400 font-bold">${u.points||0} pt</td>
+                </tr>
+            `).join('');
             document.getElementById('leaderboardModal').classList.remove('hidden');
         }
 
-        window.populateDropdowns = function() {
-            const du = document.getElementById('dashUser'); const au = document.getElementById('actUser');
-            const usersOpts = `<option value="">الكل (بدون تصفية)</option>` + window.db.users.filter(u => u.username !== 'admin').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
-            if(du) du.innerHTML = usersOpts; if(au) au.innerHTML = usersOpts;
+        window.handleSaveCase = function(e) {
+            e.preventDefault(); 
+            const sessionDate = document.getElementById('sessionDate').value;
+            
+            if(window.isPastDate(sessionDate)) { alert('عفواً، لا يمكن تحديد تاريخ جلسة سابق لتاريخ اليوم!'); return; }
 
-            const cs = document.getElementById('caseSec'); const jg = document.getElementById('schJudge'); const sc = document.getElementById('schSec');
-            if(cs) {
-                if (window.currentUser && window.currentUser.role === 'أمين سر') {
-                    cs.innerHTML = `<option value="${window.currentUser.fullName}">${window.currentUser.fullName}</option>`;
-                    cs.disabled = true; cs.classList.add('bg-slate-950', 'text-slate-500', 'cursor-not-allowed', 'border-slate-800'); cs.classList.remove('bg-slate-800', 'text-white', 'border-slate-700');
-                } else {
-                    cs.innerHTML = window.db.users.filter(u => u.role === 'أمين سر').map(u => `<option value="${u.fullName}">${u.fullName}</option>`).join('');
-                    cs.disabled = false; cs.classList.remove('bg-slate-950', 'text-slate-500', 'cursor-not-allowed', 'border-slate-800'); cs.classList.add('bg-slate-800', 'text-white', 'border-slate-700');
+            const caseNum = document.getElementById('caseNum').value + '/' + document.getElementById('caseYear').value;
+            const secretaryChoice = window.currentUser.role === 'أمين سر' ? window.currentUser.fullName : document.getElementById('caseSec').value;
+            
+            // Multiple Claimants extraction
+            const claimNames = document.querySelectorAll('.claimant-name');
+            const claimPhones = document.querySelectorAll('.claimant-phone');
+            let claimantsArr = [];
+            for(let i=0; i<claimNames.length; i++) {
+                if(claimNames[i].value) {
+                    window.autoSaveEntity(claimNames[i].value, claimPhones[i].value, window.currentUser.fullName);
+                    claimantsArr.push({ name: window.encrypt(claimNames[i].value), phone: window.encrypt(claimPhones[i].value) });
                 }
             }
-            if(jg && sc) {
-                jg.innerHTML = window.db.users.filter(u => (u.role === 'قاضي تحضير' || u.role === 'مدير إدارة')).map(u => `<option>${u.fullName}</option>`).join('');
-                sc.innerHTML = window.db.users.filter(u => u.role === 'أمين سر').map(u => `<option>${u.fullName}</option>`).join('');
-            }
-            if(window.currentUser && window.currentUser.role !== 'مدير إدارة' && window.currentUser.role !== 'مدير نظام') {
-                const sArea = document.getElementById('scheduleFormArea'); if(sArea) sArea.classList.add('hidden');
-            }
-        }
 
-        window.openProfileModal = function() {
-            document.getElementById('profFullName').value = window.currentUser.fullName;
-            document.getElementById('profRole').value = window.currentUser.role;
-            document.getElementById('profEmail').value = window.currentUser.email ? window.currentUser.email.replace('@eecourts.gov.eg', '') : '';
-            document.getElementById('profPass').value = ''; 
-            document.getElementById('profileModal').classList.remove('hidden');
-        }
-        
-        window.saveProfile = async function(e) {
-            e.preventDefault(); const u = window.db.users.find(x => x.id === window.currentUser.id);
-            u.email = document.getElementById('profEmail').value + '@eecourts.gov.eg'; 
-            const newPass = document.getElementById('profPass').value;
-            if(newPass) { u.password = await window.hashPassword(newPass); }
-            window.currentUser = u; window.saveDB(); window.closeModal('profileModal'); alert('تم الحفظ بنجاح.');
-        }
+            // Multiple Defendants extraction
+            const defNames = document.querySelectorAll('.def-name');
+            const defPhones = document.querySelectorAll('.def-phone');
+            let defendantsArr = [];
+            for(let i=0; i<defNames.length; i++) {
+                if(defNames[i].value) {
+                    window.autoSaveEntity(defNames[i].value, defPhones[i].value, window.currentUser.fullName);
+                    defendantsArr.push({ name: window.encrypt(defNames[i].value), phone: window.encrypt(defPhones[i].value) });
+                }
+            }
 
-        window.handleSaveCase = function(e) {
-            e.preventDefault(); const sessionDate = document.getElementById('sessionDate').value;
-            const secretaryChoice = window.currentUser.role === 'أمين سر' ? window.currentUser.fullName : document.getElementById('caseSec').value;
+            if(claimantsArr.length === 0) { alert('يجب إضافة مدعي واحد على الأقل.'); return; }
+
             const newCase = {
-                id: 'case_' + Date.now(), caseNum: document.getElementById('caseNum').value + '/' + document.getElementById('caseYear').value,
-                claimant: document.getElementById('claimantName').value, claimantPhone: document.getElementById('claimantPhone').value,
-                defendant: document.getElementById('defendantName').value, defendantPhone: document.getElementById('defendantPhone').value,
+                id: 'case_' + Date.now(), caseNum: caseNum,
+                claimants: claimantsArr, 
+                defendants: defendantsArr, 
                 dateStr: window.formatDateDDMMYYYY(sessionDate), dayStr: window.getDayNameFromDate(sessionDate), timeStr: window.formatArabicTime(document.getElementById('sessionTime').value),
                 secretaryName: secretaryChoice, creator: window.currentUser.fullName, createdAt: window.getCairoDateTimeString(), notificationsSent: []
             };
             if(!window.db.cases) window.db.cases = [];
             window.db.cases.unshift(newCase);
-            window.addPoint('تسجيل دعوى'); window.logActivity('تسجيل دعوى', `تسجيل دعوى رقم ${newCase.caseNum}`);
-            e.target.reset(); window.renderCasesTable();
+            window.saveDB();
+            window.addPoints(1); 
+            window.logActivity('تسجيل دعوى يدوي', `تسجيل دعوى رقم ${newCase.caseNum}`);
+            
+            // Reset Form and Counters
+            e.target.reset(); 
+            window.claimantCount = 1;
+            window.defendantCount = 1;
+            document.getElementById('claimantsContainer').innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label class="block text-slate-300 mb-1">اسم المدعي <button type="button" onclick="openRepModal('claimant', 0)" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" id="claimantName_0" class="claimant-name w-full bg-slate-800 rounded p-2 text-white" required></div><div><label class="block text-slate-300 mb-1">هاتف المدعي</label><input type="tel" id="claimantPhone_0" class="claimant-phone w-full bg-slate-800 rounded p-2 text-white" required></div></div>`;
+            document.getElementById('defendantsContainer').innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label class="block text-slate-300 mb-1">اسم المدعى عليه <button type="button" onclick="openRepModal('defendant', 0)" class="text-amber-500 hover:text-amber-400 float-left transition-colors"><i class="fa-solid fa-address-book"></i> الدفتر</button></label><input type="text" class="def-name w-full bg-slate-800 rounded p-2 text-white" required id="defendantName_0"></div><div><label class="block text-slate-300 mb-1">هاتف المدعى عليه</label><input type="tel" class="def-phone w-full bg-slate-800 rounded p-2 text-white" required id="defendantPhone_0"></div></div>`;
+            
+            window.renderCasesTable();
         }
 
-        window.deleteCase = function(id) {
-            if(!confirm('تحذير مدير النظام: هل أنت متأكد من حذف هذه الدعوى؟\nسيتم نقل الدعوى للأرشيف السري، وخصم نقطة الإدخال ونقاط الرسائل المُرسلة منها.')) return;
-            const cIndex = window.db.cases.findIndex(c => c.id === id);
-            if(cIndex > -1) {
-                const caseData = window.db.cases[cIndex];
-                
-                const u = window.db.users.find(usr => usr.fullName === caseData.creator);
-                if(u && u.points > 0 && u.role !== 'مدير نظام') u.points--;
+        window.triggerExcelUploadModal = function(e) {
+            const file = e.target.files[0];
+            if(!file) return;
+            window.pendingExcelFile = file;
+            const sd = document.getElementById('excelSessionDate');
+            sd.min = new Date().toISOString().split('T')[0];
+            document.getElementById('excelDateModal').classList.remove('hidden');
+        }
 
-                if (caseData.notificationsSent && caseData.notificationsSent.length > 0) {
-                    caseData.notificationsSent.forEach(notification => {
-                        const senderUser = window.db.users.find(usr => usr.fullName === notification.sender);
-                        if (senderUser && senderUser.points > 0 && senderUser.role !== 'مدير نظام') senderUser.points--;
+        window.processExcelUpload = function() {
+            const unifiedDate = document.getElementById('excelSessionDate').value;
+            const unifiedTime = document.getElementById('excelSessionTime').value;
+            
+            if(!unifiedDate) { alert('يجب تحديد تاريخ الجلسة أولاً!'); return; }
+            if(window.isPastDate(unifiedDate)) { alert('لا يمكن تحديد تاريخ جلسة أقدم من تاريخ اليوم!'); return; }
+            
+            window.closeModal('excelDateModal');
+            
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const firstSheet = workbook.SheetNames[0];
+                    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], {defval: ''});
+                    
+                    let readyCases = [];
+                    incompleteExcelCases = [];
+
+                    if(rows.length === 0) { alert('ملف الإكسيل فارغ.'); document.getElementById('excelUpload').value = ''; return; }
+
+                    const standardFormattedDate = window.formatDateDDMMYYYY(unifiedDate);
+                    const standardDayName = window.getDayNameFromDate(unifiedDate);
+                    const standardArabicTime = window.formatArabicTime(unifiedTime);
+
+                    rows.forEach((row) => {
+                        const cleanRow = {};
+                        for(let key in row) {
+                            let normKey = key.trim().replace(/\s+/g, ' ').replace(/ى/g, 'ي').replace(/أ|إ|آ/g, 'ا');
+                            cleanRow[normKey] = row[key];
+                        }
+
+                        const cNum = cleanRow['رقم القضية'] || cleanRow['رقم الدعوي'] || cleanRow['رقم'] || '';
+                        const cYear = cleanRow['السنة'] || cleanRow['سنة الدعوي'] || new Date().getFullYear();
+                        const cClaimant = cleanRow['اسم المدعي'] || cleanRow['المدعي'] || '';
+                        let cClaimantPhone = cleanRow['رقم تليفون المدعي'] || cleanRow['تليفون المدعي'] || cleanRow['هاتف المدعي'] || '';
+                        const cDefendant = cleanRow['اسم المدعي عليه'] || cleanRow['المدعي عليه'] || '';
+                        let cDefendantPhone = cleanRow['رقم تليفون المدعي عليه'] || cleanRow['تليفون المدعي عليه'] || cleanRow['هاتف المدعي عليه'] || '';
+
+                        if(!cNum || (!cClaimant && !cDefendant)) return; 
+
+                        let formatPhone = (p) => { let s = String(p).trim(); if(s.endsWith('.0')) s = s.slice(0, -2); if(s.length >= 9 && !s.startsWith('0')) s = '0' + s; return s; };
+                        
+                        cClaimantPhone = formatPhone(cClaimantPhone);
+                        cDefendantPhone = formatPhone(cDefendantPhone);
+
+                        let isComplete = cClaimantPhone.length > 5 && cDefendantPhone.length > 5;
+
+                        const caseObj = {
+                            tempId: Date.now() + Math.random(), caseNum: cNum + '/' + cYear,
+                            claimant: cClaimant, claimantPhone: cClaimantPhone, defendant: cDefendant, defendantPhone: cDefendantPhone,
+                            dateStr: standardFormattedDate, dayStr: standardDayName, timeStr: standardArabicTime,
+                            secretaryName: window.currentUser.role === 'أمين سر' ? window.currentUser.fullName : (cleanRow['امين السر'] || 'غير محدد'),
+                            creator: window.currentUser.fullName
+                        };
+
+                        if(isComplete) readyCases.push(caseObj); else incompleteExcelCases.push(caseObj);
                     });
-                }
-                
-                if(!window.db.deletedCases) window.db.deletedCases = [];
-                caseData.deletedAt = window.getCairoDateTimeString();
-                caseData.deletedBy = window.currentUser.fullName;
-                window.db.deletedCases.unshift(caseData);
-                
-                window.db.cases.splice(cIndex, 1);
-                
-                window.logActivity('حذف دعوى (صلاحية مدير)', `حذف الدعوى ${caseData.caseNum} وخصم النقاط المرتبطة بها`);
-                window.saveDB();
-                window.renderCasesTable();
-            }
+
+                    if(readyCases.length === 0 && incompleteExcelCases.length === 0) {
+                        alert('لم يتم العثور على أي قضايا صالحة في الملف!'); document.getElementById('excelUpload').value = ''; return;
+                    }
+
+                    if(!window.db.cases) window.db.cases = [];
+                    readyCases.forEach(c => {
+                        window.autoSaveEntity(c.claimant, c.claimantPhone, window.currentUser.fullName); 
+                        window.autoSaveEntity(c.defendant, c.defendantPhone, window.currentUser.fullName);
+                        window.db.cases.unshift({
+                            id: 'case_' + c.tempId, caseNum: c.caseNum, 
+                            claimants: [{name: window.encrypt(c.claimant), phone: window.encrypt(c.claimantPhone)}],
+                            defendants: [{name: window.encrypt(c.defendant), phone: window.encrypt(c.defendantPhone)}],
+                            dateStr: c.dateStr, dayStr: c.dayStr, timeStr: c.timeStr, secretaryName: c.secretaryName, creator: c.creator, createdAt: window.getCairoDateTimeString(), notificationsSent: []
+                        });
+                        window.addPoints(0.5); 
+                    });
+
+                    window.saveDB(); 
+
+                    if(readyCases.length > 0) window.logActivity('استيراد إكسيل', `تم استيراد ${readyCases.length} قضية كاملة بجلسة ${standardFormattedDate}`);
+
+                    if(incompleteExcelCases.length > 0) {
+                        alert(`تم حفظ ${readyCases.length} قضية كاملة. يوجد ${incompleteExcelCases.length} قضية ينقصها أرقام الهواتف.`);
+                        window.renderExcelStaging();
+                    } else { alert(`تم الاستيراد بنجاح.`); window.switchTab('cases'); }
+                    document.getElementById('excelUpload').value = '';
+                } catch(error) { alert('حدث خطأ أثناء قراءة الملف.'); }
+            };
+            reader.readAsArrayBuffer(window.pendingExcelFile);
+        }
+
+        window.renderExcelStaging = function() {
+            window.switchTab('excelStaging');
+            const cont = document.getElementById('excelStagingContent');
+            cont.innerHTML = `
+                <div class="bg-slate-900 border border-amber-500/50 rounded-xl p-6 shadow-xl mb-6">
+                    <h3 class="text-sm font-bold text-amber-400 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-triangle-exclamation"></i> استكمال بيانات الهواتف الناقصة (الاستيراد)</h3>
+                    <div class="space-y-4">
+                        ${incompleteExcelCases.map((c, i) => `
+                            <div class="grid grid-cols-1 md:grid-cols-6 gap-4 bg-slate-950 p-4 rounded border border-slate-800 items-center">
+                                <div class="font-bold text-amber-500">${c.caseNum}</div>
+                                <div><label class="block text-slate-400 text-[10px]">المدعي (${c.claimant})</label><input type="tel" id="stg_cp_${i}" value="${c.claimantPhone}" class="w-full bg-slate-800 rounded p-1.5 text-xs text-white"></div>
+                                <div><label class="block text-slate-400 text-[10px]">المدعى عليه (${c.defendant})</label><input type="tel" id="stg_dp_${i}" value="${c.defendantPhone}" class="w-full bg-slate-800 rounded p-1.5 text-xs text-white"></div>
+                                <div class="text-[10px] text-slate-400">التاريخ: ${c.dateStr}</div>
+                                <div class="col-span-2 flex gap-2 justify-end">
+                                    <button onclick="deleteStagedCase(${i})" class="bg-rose-600 hover:bg-rose-500 text-white text-xs px-3 py-1.5 rounded shadow transition"><i class="fa-solid fa-trash ml-1"></i> حذف</button>
+                                    <button onclick="saveStagedCase(${i})" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded shadow transition">حفظ الدعوى</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        window.deleteStagedCase = function(index) {
+            if(!confirm('هل أنت متأكد من حذف هذه القضية وعدم استكمالها؟')) return;
+            incompleteExcelCases.splice(index, 1);
+            if(incompleteExcelCases.length === 0) window.switchTab('cases'); else window.renderExcelStaging();
+        }
+
+        window.saveStagedCase = function(index) {
+            const c = incompleteExcelCases[index];
+            const cp = document.getElementById(`stg_cp_${index}`).value;
+            const dp = document.getElementById(`stg_dp_${index}`).value;
+            if(cp.length < 5 || dp.length < 5) { alert('الرجاء إدخال أرقام هواتف صحيحة'); return; }
+            
+            window.autoSaveEntity(c.claimant, cp, window.currentUser.fullName); window.autoSaveEntity(c.defendant, dp, window.currentUser.fullName);
+            window.db.cases.unshift({
+                id: 'case_' + c.tempId, caseNum: c.caseNum, 
+                claimants: [{name: window.encrypt(c.claimant), phone: window.encrypt(cp)}],
+                defendants: [{name: window.encrypt(c.defendant), phone: window.encrypt(dp)}],
+                dateStr: c.dateStr, dayStr: c.dayStr, timeStr: c.timeStr, secretaryName: c.secretaryName, creator: c.creator, createdAt: window.getCairoDateTimeString(), notificationsSent: []
+            });
+            window.saveDB(); window.addPoints(0.5); window.logActivity('استكمال قضية', `تم استكمال قضية إكسيل رقم ${c.caseNum}`);
+            incompleteExcelCases.splice(index, 1);
+            if(incompleteExcelCases.length === 0) window.switchTab('cases'); else window.renderExcelStaging();
         }
 
         window.renderCasesTable = function() {
             const tbody = document.getElementById('casesTbody');
-            const search = document.getElementById('searchCases').value.toLowerCase();
+            const search = (document.getElementById('searchCases').value || '').toLowerCase();
             const cases = window.db.cases || [];
-            const filtered = cases.filter(c => c.caseNum.includes(search) || JSON.stringify(c.notificationsSent).includes(search) || c.claimant.includes(search) || c.defendant.includes(search));
+            const canDelete = window.currentUser.role === 'مدير نظام' || window.currentUser.role === 'مدير إدارة';
             
-            if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="p-6 text-center text-slate-500">لا يوجد قضايا مسجلة مطابقة للبحث</td></tr>'; return; }
+            let filtered = [];
+            cases.forEach(c => {
+                c._claimantsList = c.claimants ? c.claimants.map(cl => ({name: window.decrypt(cl.name), phone: window.decrypt(cl.phone)})) : (c.claimant ? [{name: window.decrypt(c.claimant), phone: window.decrypt(c.claimantPhone)}] : []);
+                c._defendantsList = c.defendants ? c.defendants.map(d => ({name: window.decrypt(d.name), phone: window.decrypt(d.phone)})) : (c.defendant ? [{name: window.decrypt(c.defendant), phone: window.decrypt(c.defendantPhone)}] : []);
+                
+                let matches = c.caseNum.includes(search);
+                c._claimantsList.forEach(cl => { if(cl.name.includes(search) || cl.phone.includes(search)) matches = true; });
+                c._defendantsList.forEach(d => { if(d.name.includes(search) || d.phone.includes(search)) matches = true; });
+                
+                if(c.notificationsSent) {
+                    c.notificationsSent.forEach(n => {
+                        if(n.verificationCode && n.verificationCode.toLowerCase().includes(search)) matches = true;
+                    });
+                }
+
+                if(matches) filtered.push(c);
+            });
+
+            if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-500">لا يوجد قضايا مطابقة</td></tr>'; return; }
             tbody.innerHTML = filtered.map(c => `
                 <tr class="hover:bg-slate-800/60 transition-colors">
                     <td class="p-3 font-bold text-amber-400 font-mono">${c.caseNum}</td>
-                    <td class="p-3">${c.claimant}<br><span class="text-[10px] text-slate-400 font-mono">${c.claimantPhone}</span></td>
-                    <td class="p-3">${c.defendant}<br><span class="text-[10px] text-slate-400 font-mono">${c.defendantPhone}</span></td>
-                    <td class="p-3 text-xs"><span class="bg-slate-900 px-2 py-1 rounded inline-block mb-1"><span dir="ltr" class="font-mono text-white">${c.dateStr}</span> ${c.dayStr} <span class="text-amber-400 mx-1">|</span> ${c.timeStr}</span><br><span class="text-[10px] text-slate-400">أمين السر: <span class="text-slate-300 font-bold">${c.secretaryName || 'غير محدد'}</span></span></td>
-                    <td class="p-3 text-[11px] text-slate-400">${c.creator}</td>
-                    <td class="p-3 text-[10px]">${(c.notificationsSent && c.notificationsSent.length) ? c.notificationsSent.map(n => `<div class="bg-slate-950 border border-slate-800 p-1.5 mb-1 rounded"><span class="text-emerald-400">✓ ${n.type} لـ ${n.target === 'def' ? 'المدعى عليه' : 'المدعي'}</span><br><span class="text-amber-500 font-mono">كود: ${n.verificationCode}</span><br><span class="text-slate-500">بواسطة: ${n.sender}</span></div>`).join('') : '<span class="text-slate-600">لم تُرسل إخطارات</span>'}</td>
-                    <td class="p-3 text-center flex flex-col gap-1.5">
-                        <button onclick="prepWA('${c.id}', 'def')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] px-2 py-1.5 rounded transition-colors shadow"><i class="fa-brands fa-whatsapp ml-1"></i>للمدعى عليه</button>
-                        <button onclick="prepWA('${c.id}', 'claim')" class="bg-teal-600 hover:bg-teal-500 text-white text-[10px] px-2 py-1.5 rounded transition-colors shadow"><i class="fa-brands fa-whatsapp ml-1"></i>للمدعي</button>
-                        ${window.currentUser.role === 'مدير نظام' ? `<button onclick="deleteCase('${c.id}')" class="bg-rose-900/50 hover:bg-rose-700 text-rose-300 hover:text-white border border-rose-800 text-[10px] px-2 py-1.5 rounded transition-colors shadow mt-1"><i class="fa-solid fa-trash-can ml-1"></i>حذف كمدير</button>` : ''}
+                    <td class="p-3 text-[11px]">${c._claimantsList.map(cl => `<div class="mb-1 text-slate-200 border-r-2 border-amber-500 pr-1">${cl.name}</div>`).join('')}</td>
+                    <td class="p-3 text-[11px]">${c._defendantsList.map(d => `<div class="mb-1 bg-slate-900 p-1 rounded border border-slate-700">${d.name}</div>`).join('')}</td>
+                    <td class="p-3 text-xs"><span class="bg-slate-900 px-2 py-1 rounded inline-block font-mono text-white">${c.dateStr}</span></td>
+                    <td class="p-3">
+                        <div class="flex flex-wrap gap-1 justify-center items-center">
+                            <button onclick="openCaseDetails('${c.id}')" class="bg-blue-600 hover:bg-blue-500 text-white text-[10px] px-2 py-1.5 rounded transition shadow">فتح التفاصيل</button>
+                            ${c._claimantsList.map((cl, i) => `<button onclick="prepWA('${c.id}', 'claimant', ${i})" title="إرسال للمدعي ${cl.name}" class="bg-teal-600 hover:bg-teal-500 text-white text-[10px] px-2 py-1.5 rounded transition shadow"><i class="fa-brands fa-whatsapp"></i></button>`).join('')}
+                            ${c._defendantsList.map((d, i) => `<button onclick="prepWA('${c.id}', 'defendant', ${i})" title="إرسال للمدعى عليه ${d.name}" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] px-2 py-1.5 rounded transition shadow"><i class="fa-brands fa-whatsapp"></i></button>`).join('')}
+                            ${canDelete ? `<button onclick="deleteCase('${c.id}')" title="حذف القضية للأرشيف" class="bg-rose-700 hover:bg-rose-600 text-white text-[10px] px-2 py-1.5 rounded transition shadow"><i class="fa-solid fa-trash-can"></i></button>` : ''}
+                        </div>
                     </td>
                 </tr>`).join('');
         }
 
-        window.renderDeletedTable = function() {
-            const tbody = document.getElementById('deletedTbody');
-            const dCases = window.db.deletedCases || [];
-            if(dCases.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-500">الأرشيف السري فارغ. لا توجد قضايا محذوفة.</td></tr>'; return; }
-            tbody.innerHTML = dCases.map(c => `
-                <tr class="hover:bg-rose-950/20 transition-colors">
-                    <td class="p-3 font-bold text-amber-400 font-mono">${c.caseNum}</td>
-                    <td class="p-3 text-xs"><span class="text-slate-400">المدعي:</span> ${c.claimant}<br><span class="text-slate-400">المدعى عليه:</span> ${c.defendant}</td>
-                    <td class="p-3 text-xs font-mono">${c.dateStr}</td>
-                    <td class="p-3 text-xs">${c.creator}<br><span class="text-[10px] text-slate-500">وقت الإنشاء: ${c.createdAt || 'قديم'}</span></td>
-                    <td class="p-3 text-xs"><span class="text-rose-400 font-bold"><i class="fa-solid fa-user-xmark ml-1"></i>حذف بواسطة: ${c.deletedBy}</span><br><span class="text-[10px] text-slate-500 font-mono mt-1 block">${c.deletedAt}</span></td>
-                </tr>`).join('');
-        }
+        window.deleteCase = function(id) {
+            if(!confirm('تحذير: هل أنت متأكد من حذف هذه الدعوى؟\nسيتم نقل الدعوى للأرشيف السري، وخصم نقطة الإدخال ونقاط الرسائل المُرسلة منها.')) return;
+            const cIdx = window.db.cases.findIndex(x => x.id === id);
+            if(cIdx > -1) {
+                const c = window.db.cases[cIdx];
+                const u = window.db.users.find(usr => usr.fullName === c.creator);
+                if(u && u.points > 0 && u.role !== 'مدير نظام') u.points--;
 
-        window.exportData = function(type) {
-            if(type === 'excel') {
-                let csv = '\ufeffرقم الدعوى,المدعي,هاتف المدعي,المدعى عليه,هاتف المدعى عليه,أمين السر,تاريخ الجلسة,وقت الجلسة,مدخل البيانات\n';
-                (window.db.cases||[]).forEach(c => { csv += `${c.caseNum},${c.claimant},${c.claimantPhone},${c.defendant},${c.defendantPhone},${c.secretaryName},${c.dateStr},${c.timeStr},${c.creator}\n`; });
-                let blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
-                let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'سجل_قضايا_الوساطة.csv'; a.click();
-            } else if(type === 'word') {
-                let html = "<html dir='rtl'><head><meta charset='utf-8'></head><body style='font-family:Arial,sans-serif;'><h2 style='text-align:center;'>سجل القضايا المجدولة - إدارة التحضير والوساطة</h2><br><table border='1' cellpadding='5' style='border-collapse:collapse;width:100%;text-align:right;'><tr><th>رقم الدعوى</th><th>المدعي</th><th>المدعى عليه</th><th>أمين السر</th><th>تاريخ الجلسة</th></tr>";
-                (window.db.cases||[]).forEach(c => { html += `<tr><td>${c.caseNum}</td><td>${c.claimant}</td><td>${c.defendant}</td><td>${c.secretaryName}</td><td>${c.dateStr}</td></tr>`; });
-                html += "</table><br><p style='text-align:center;font-size:12px;'>جميع حقوق الملكية الفكرية محفوظة لهيئة التحضير والوساطة بمحكمة القاهرة الاقتصادية</p></body></html>";
-                let blob = new Blob(['\ufeff', html], {type: 'application/msword'});
-                let a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'تقرير_قضايا_الوساطة.doc'; a.click();
+                if (c.notificationsSent && c.notificationsSent.length > 0) {
+                    c.notificationsSent.forEach(notification => {
+                        const senderUser = window.db.users.find(usr => usr.fullName === notification.sender);
+                        if (senderUser && senderUser.points > 0 && senderUser.role !== 'مدير نظام') senderUser.points--;
+                    });
+                }
+
+                if(!window.db.deletedCases) window.db.deletedCases = [];
+                c.deletedBy = window.currentUser.fullName; c.deletedAt = window.getCairoDateTimeString();
+                window.db.deletedCases.unshift(c);
+                window.db.cases.splice(cIdx, 1);
+                window.logActivity('حذف دعوى (خصم نقاط)', `تم حذف القضية رقم ${c.caseNum} للأرشيف`);
+                window.saveDB(); window.renderCasesTable(); window.updateUserPointsDisplay();
             }
-            window.logActivity('تصدير بيانات', `قام مدير النظام بتصدير بيانات القضايا بصيغة ${type}`);
         }
 
-        window.prepWA = function(caseId, target) {
-            window.activeWhatsappContext = { caseId, target };
-            const c = window.db.cases.find(x => x.id === caseId); const isDef = target === 'def';
-            document.getElementById('waTitle').innerHTML = `<i class="fa-brands fa-whatsapp ml-1 text-emerald-400"></i> إرسال إلى ${isDef ? 'المدعى عليه' : 'المدعي'} (${c.caseNum})`;
-            let msg1 = (isDef ? window.db.msg1DefendantTemplate : window.db.msg1ClaimantTemplate).replace('[اسم المدعى عليه]', c.defendant).replace('[اسم المدعي]', c.claimant).replace('[اليوم]', c.dayStr).replace('[التاريخ]', c.dateStr).replace('[الساعة]', c.timeStr).replace('[اسم أمين السر]', c.secretaryName || 'غير محدد');
+        window.openCaseDetails = function(id) {
+            const c = window.db.cases.find(x => x.id === id); if(!c) return;
+            window.switchTab('caseDetails');
+            const cont = document.getElementById('caseDetailsContent');
+            const isSec = window.currentUser.role === 'أمين سر';
+            
+            c._claimantsList = c.claimants ? c.claimants.map(cl => ({name: window.decrypt(cl.name), phone: window.decrypt(cl.phone)})) : (c.claimant ? [{name: window.decrypt(c.claimant), phone: window.decrypt(c.claimantPhone)}] : []);
+            c._defendantsList = c.defendants ? c.defendants.map(d => ({name: window.decrypt(d.name), phone: window.decrypt(d.phone)})) : (c.defendant ? [{name: window.decrypt(c.defendant), phone: window.decrypt(c.defendantPhone)}] : []);
+            
+            let historyHTML = (window.db.activities || []).filter(a => (a.details || '').includes(c.caseNum)).map(a => `
+                <div class="border-b border-slate-800 py-2 text-xs">
+                    <span class="text-amber-400 font-bold">${a.userFullName}</span> <span class="text-slate-400 text-[10px] font-mono mx-2">${a.cairoTime}</span><br>
+                    <span class="text-white">${a.type}: ${a.details}</span>
+                </div>
+            `).join('');
+            if(!historyHTML) historyHTML = '<p class="text-slate-500 text-xs py-2">لا يوجد عمليات مسجلة</p>';
+
+            let notifsHTML = (c.notificationsSent || []).map(n => `<div class="bg-slate-900 border border-slate-700 p-2 mb-2 rounded text-[10px]"><span class="text-emerald-400 font-bold">✓ ${n.type} لـ ${n.targetName || 'طرف'}</span><br>كود التوثيق (الرقم المسلسل): <span class="text-amber-500 font-mono font-bold">${n.verificationCode}</span><br><span class="text-slate-500">أرسلها: ${n.sender} - ${new Date(n.date).toLocaleString('ar-EG')}</span></div>`).join('');
+            if(!notifsHTML) notifsHTML = '<p class="text-slate-500 text-xs py-2">لم تُرسل رسائل بعد</p>';
+
+            cont.innerHTML = `
+                <div class="flex justify-between items-center mb-4"><h2 class="text-lg font-bold text-amber-400">تفاصيل الدعوى ${c.caseNum}</h2><button onclick="switchTab('cases')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-arrow-right"></i> عودة للقائمة</button></div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+                            <h3 class="text-sm font-bold text-slate-200 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-pen-to-square"></i> بيانات الدعوى الجوهرية</h3>
+                            <form onsubmit="updateCaseDetails(event, '${id}')" class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                <div><label class="block text-slate-300 mb-1">تاريخ الجلسة</label><input type="text" id="detDate" value="${c.dateStr}" class="w-full bg-slate-800 rounded p-2 text-white" ${isSec ? 'disabled' : ''} placeholder="مثال: 15/10/2026"></div>
+                                <div><label class="block text-slate-300 mb-1">وقت الجلسة</label><input type="text" id="detTime" value="${c.timeStr}" class="w-full bg-slate-800 rounded p-2 text-white" ${isSec ? 'disabled' : ''}></div>
+                                
+                                <div class="md:col-span-2 border-t border-slate-800 pt-4"><h4 class="block text-slate-300 mb-2 font-bold text-amber-500">المدعين</h4>
+                                    ${c._claimantsList.map((cl, i) => `
+                                        <div class="flex gap-2 mb-2">
+                                            <input type="text" id="detCName_${i}" value="${cl.name}" class="w-1/2 bg-slate-800 rounded p-2 text-white" ${isSec ? 'disabled' : ''}>
+                                            <input type="text" id="detCPhone_${i}" value="${cl.phone}" class="w-1/2 bg-slate-800 rounded p-2 text-white" ${isSec ? 'disabled' : ''}>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                <div class="md:col-span-2"><h4 class="block text-slate-300 mb-2 font-bold text-amber-500">المدعى عليهم</h4>
+                                    ${c._defendantsList.map((d, i) => `
+                                        <div class="flex gap-2 mb-2">
+                                            <input type="text" id="detDName_${i}" value="${d.name}" class="w-1/2 bg-slate-800 rounded p-2 text-white" ${isSec ? 'disabled' : ''}>
+                                            <input type="text" id="detDPhone_${i}" value="${d.phone}" class="w-1/2 bg-slate-800 rounded p-2 text-white" ${isSec ? 'disabled' : ''}>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                ${!isSec ? `<div class="md:col-span-2 mt-2"><button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white font-bold px-4 py-2 rounded transition-colors w-full shadow">حفظ التعديلات على البيانات</button></div>` : '<div class="md:col-span-2 text-slate-500 text-center mt-2">ليس لديك صلاحية لتعديل البيانات</div>'}
+                            </form>
+                        </div>
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+                            <h3 class="text-sm font-bold text-slate-200 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-paper-plane text-emerald-400"></i> إرسال الإخطارات</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                ${c._claimantsList.map((cl, i) => `
+                                    <button onclick="prepWA('${c.id}', 'claimant', ${i})" class="bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold py-3 rounded shadow transition-colors"><i class="fa-brands fa-whatsapp ml-1"></i> إرسال للمدعي (${cl.name.split(' ')[0]})</button>
+                                `).join('')}
+                                ${c._defendantsList.map((d, i) => `
+                                    <button onclick="prepWA('${c.id}', 'defendant', ${i})" class="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-3 rounded shadow transition-colors"><i class="fa-brands fa-whatsapp ml-1"></i> إرسال لـ (${d.name.split(' ')[0]})</button>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl max-h-80 overflow-y-auto">
+                            <h3 class="text-sm font-bold text-amber-400 sticky top-0 bg-slate-900 pb-2 border-b border-slate-800 mb-2"><i class="fa-solid fa-history"></i> سجل العمليات لهذه القضية</h3>
+                            ${historyHTML}
+                        </div>
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl max-h-80 overflow-y-auto">
+                            <h3 class="text-sm font-bold text-emerald-400 sticky top-0 bg-slate-900 pb-2 border-b border-slate-800 mb-2"><i class="fa-solid fa-check-double"></i> الإخطارات المُرسلة</h3>
+                            ${notifsHTML}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.updateCaseDetails = function(e, id) {
+            e.preventDefault();
+            const c = window.db.cases.find(x => x.id === id); if(!c) return;
+            c.dateStr = document.getElementById('detDate').value; c.timeStr = document.getElementById('detTime').value;
+            
+            // Backward compatibility update to arrays if saving from details
+            if (!c.claimants) { c.claimants = [{name: c.claimant, phone: c.claimantPhone}]; }
+            c._claimantsList.forEach((cl, i) => {
+                c.claimants[i].name = window.encrypt(document.getElementById(`detCName_${i}`).value);
+                c.claimants[i].phone = window.encrypt(document.getElementById(`detCPhone_${i}`).value);
+            });
+            
+            c._defendantsList.forEach((d, i) => {
+                c.defendants[i].name = window.encrypt(document.getElementById(`detDName_${i}`).value);
+                c.defendants[i].phone = window.encrypt(document.getElementById(`detDPhone_${i}`).value);
+            });
+            
+            window.logActivity('تعديل قضية', `تعديل بيانات القضية ${c.caseNum}`);
+            window.saveDB(); alert('تم حفظ التعديلات بنجاح'); window.openCaseDetails(id);
+        }
+
+        window.prepWA = function(caseId, targetType, targetIndex) {
+            const c = window.db.cases.find(x => x.id === caseId);
+            let targetName = '', targetPhone = '';
+            
+            let claimantsList = c.claimants ? c.claimants.map(cl => ({name: window.decrypt(cl.name), phone: window.decrypt(cl.phone)})) : (c.claimant ? [{name: window.decrypt(c.claimant), phone: window.decrypt(c.claimantPhone)}] : []);
+            let defsList = c.defendants ? c.defendants.map(d => ({name: window.decrypt(d.name), phone: window.decrypt(d.phone)})) : (c.defendant ? [{name: window.decrypt(c.defendant), phone: window.decrypt(c.defendantPhone)}] : []);
+            
+            if(targetType === 'claimant') { targetName = claimantsList[targetIndex].name; targetPhone = claimantsList[targetIndex].phone; }
+            else { targetName = defsList[targetIndex].name; targetPhone = defsList[targetIndex].phone; }
+            
+            window.activeWhatsappContext = { caseId, targetType, targetName, targetPhone };
+            
+            document.getElementById('waTitle').innerHTML = `<i class="fa-brands fa-whatsapp ml-1 text-emerald-400"></i> إرسال إلى: ${targetName} (${c.caseNum})`;
+            
+            let tmpl = targetType === 'defendant' ? window.db.msg1DefendantTemplate : window.db.msg1ClaimantTemplate;
+            
+            // Generate combined names for context
+            let allClaimantsString = claimantsList.map(cl => cl.name).join(' و ');
+            
+            let msg1 = tmpl.replace('[اسم المدعى عليه]', targetType === 'defendant' ? targetName : defsList[0].name)
+                           .replace('[اسم المدعي]', targetType === 'claimant' ? targetName : allClaimantsString)
+                           .replace('[رقم الدعوى]', c.caseNum) 
+                           .replace('[اليوم]', c.dayStr)
+                           .replace('[التاريخ]', c.dateStr)
+                           .replace('[الساعة]', c.timeStr)
+                           .replace('[اسم أمين السر]', c.secretaryName || 'غير محدد');
+            
             document.getElementById('waMsg1').value = msg1 + "\n\nموقع المحكمة: https://maps.app.goo.gl/Bp8cKHfzuBj5fniy7";
             document.getElementById('waMsg2').value = window.db.msg2Template;
             document.getElementById('waModal').classList.remove('hidden');
@@ -647,110 +1086,320 @@
 
         window.executeSendWA = function(msgNum) {
             const c = window.db.cases.find(x => x.id === window.activeWhatsappContext.caseId);
-            const phone = window.activeWhatsappContext.target === 'def' ? c.defendantPhone : c.claimantPhone;
-            let cleanPhone = phone.replace(/[^0-9]/g, ''); if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
+            const ctx = window.activeWhatsappContext;
+            let cleanPhone = ctx.targetPhone.replace(/[^0-9]/g, ''); if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
+            
             const vCode = window.generateVerificationCode();
             let text = document.getElementById(msgNum === 1 ? 'waMsg1' : 'waMsg2').value;
             text += `\n\n=== توثيق المحكمة ===\nكود التوثيق المرجعي: ${vCode}`;
+            
             if(!c.notificationsSent) c.notificationsSent = [];
-            c.notificationsSent.push({ type: msgNum === 1 ? 'رسالة أولى' : 'توعوية', target: window.activeWhatsappContext.target, sender: window.currentUser.fullName, verificationCode: vCode, date: new Date().toISOString() });
-            window.addPoint('إرسال واتساب'); window.logActivity('إرسال واتساب', `توليد كود (${vCode}) لرقم ${cleanPhone}`);
-            window.renderCasesTable(); window.closeModal('waModal');
+            c.notificationsSent.push({ type: msgNum === 1 ? 'رسالة أولى' : 'توعوية', targetName: ctx.targetName, targetPhone: window.encrypt(ctx.targetPhone), sender: window.currentUser.fullName, verificationCode: vCode, date: new Date().toISOString() });
+            
+            window.addPoints(1); window.logActivity('إرسال واتساب', `رسالة (${vCode}) للقضية ${c.caseNum} باسم ${ctx.targetName}`);
+            window.saveDB(); window.closeModal('waModal'); 
+            if(window.activeTab === 'caseDetails') window.openCaseDetails(c.id);
+            else window.renderCasesTable();
             window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, '_blank');
         }
+
+        window.backupDB = function() {
+            if(window.currentUser.role !== 'مدير نظام') return;
+            const data = JSON.stringify(window.db);
+            const blob = new Blob([data], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `EE_Courts_Backup_${new Date().getTime()}.json`; a.click();
+            window.logActivity('نسخ احتياطي', 'تنزيل نسخة احتياطية من قاعدة البيانات');
+        }
+        
+        window.restoreDB = function(e) {
+            if(window.currentUser.role !== 'مدير نظام') return;
+            if(!confirm("تحذير خطير: استعادة النسخة الاحتياطية ستمسح كافة البيانات الحالية. هل أنت متأكد؟")) return;
+            const file = e.target.files[0]; if(!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const importedData = JSON.parse(evt.target.result);
+                    if(importedData && importedData.users) {
+                        window.db = importedData; window.saveDB();
+                        window.logSystemActivity('استعادة بيانات', 'استعادة قاعدة البيانات بواسطة المدير', window.currentUser.fullName, window.currentUser.role);
+                        alert("تمت استعادة البيانات بنجاح. سيتم إعادة تحميل النظام.");
+                        setTimeout(() => location.reload(), 1000);
+                    } else { alert("ملف غير صالح."); }
+                } catch(err) { alert("حدث خطأ أثناء قراءة الملف."); }
+            };
+            reader.readAsText(file);
+        }
+
+        let dashChart1 = null;
+        let dashChart2 = null;
+        window.renderDashboard = function() {
+            const fDate = document.getElementById('dashFrom').value; 
+            const tDate = document.getElementById('dashTo').value; 
+            const usr = document.getElementById('dashUser').value;
+            
+            let cFilter = window.db.cases || [];
+            if(fDate) cFilter = cFilter.filter(c => { const parts = c.dateStr.split('/'); return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) >= new Date(fDate); });
+            if(tDate) cFilter = cFilter.filter(c => { const parts = c.dateStr.split('/'); return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) <= new Date(tDate + 'T23:59:59'); });
+            if(usr) cFilter = cFilter.filter(c => c.creator === usr);
+
+            document.getElementById('dashTotalCases').innerText = cFilter.length;
+            let tMsg = 0; 
+            cFilter.forEach(c => { 
+                if(c.notificationsSent) {
+                    tMsg += usr ? c.notificationsSent.filter(n => n.sender === usr).length : c.notificationsSent.length; 
+                }
+            });
+            document.getElementById('dashTotalMsgs').innerText = tMsg;
+            const mC = cFilter.filter(c => (c.dateStr || '').includes(String(new Date().getMonth()+1).padStart(2,'0')+'/'+new Date().getFullYear())).length;
+            document.getElementById('dashMonthCases').innerText = mC;
+            document.getElementById('dashTeamPts').innerText = window.db.users.filter(u => u.username !== 'admin').reduce((a,b) => a+(b.points||0), 0);
+
+            if(dashChart1) dashChart1.destroy(); 
+            if(dashChart2) dashChart2.destroy();
+            
+            dashChart1 = new Chart(document.getElementById('chart1').getContext('2d'), { 
+                type:'bar', 
+                data: { labels:['إجمالي القضايا','رسائل الإخطارات'], datasets:[{label:'العدد', data:[cFilter.length, tMsg], backgroundColor:['#d4af37','#10b981'], borderRadius: 4}] }, 
+                options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#cbd5e1', font:{family:'Tajawal'}}}}, scales:{y:{ticks:{color:'#94a3b8'}, grid:{color:'#334155'}},x:{ticks:{color:'#cbd5e1', font:{family:'Tajawal'}}, grid:{display:false}}}} 
+            });
+            
+            const realUsers = window.db.users.filter(u => u.username !== 'admin');
+            dashChart2 = new Chart(document.getElementById('chart2').getContext('2d'), { 
+                type:'doughnut', 
+                data: { labels:realUsers.map(u => u.fullName), datasets:[{data:realUsers.map(u => u.points||0), backgroundColor:['#d4af37','#0ea5e9','#10b981','#f43f5e', '#a855f7', '#f97316'], borderWidth: 0}] }, 
+                options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{color:'#cbd5e1', font:{family:'Tajawal'}}}}} 
+            });
+        }
+
+        window.handleSaveSchedule = function(e) { 
+            e.preventDefault(); 
+            if(!window.db.schedules) window.db.schedules = []; 
+            window.db.schedules.push({ id: Date.now(), day: document.getElementById('schDay').value, judge: document.getElementById('schJudge').value, sec: document.getElementById('schSec').value }); 
+            window.saveDB(); 
+            window.logActivity('تحديث جدول', `تم إضافة مهمة للجدول في يوم ${document.getElementById('schDay').value}`);
+            window.renderScheduleTable(); 
+        }
+
+        window.renderScheduleTable = function() {
+            let mySch = window.db.schedules || [];
+            if (window.currentUser.role !== 'مدير إدارة' && window.currentUser.role !== 'مدير نظام') {
+                mySch = mySch.filter(s => s.judge === window.currentUser.fullName || s.sec === window.currentUser.fullName);
+            }
+            const tb = document.getElementById('schTbody');
+            if(mySch.length === 0) { tb.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-slate-500">لا يوجد جداول معتمدة لك</td></tr>'; return; }
+            
+            tb.innerHTML = mySch.map(s => `
+                <tr class="hover:bg-slate-800/60">
+                    <td class="p-3 font-bold text-amber-400">${s.day}</td>
+                    <td class="p-3">${s.judge}</td>
+                    <td class="p-3">${s.sec}</td>
+                    <td class="p-3 text-center">
+                        ${(window.currentUser.role === 'مدير إدارة' || window.currentUser.role === 'مدير نظام') ? `<button onclick="deleteSch(${s.id})" class="bg-rose-900/50 hover:bg-rose-700 text-rose-300 hover:text-white border border-rose-800 text-[10px] px-2 py-1.5 rounded transition-colors shadow"><i class="fa-solid fa-trash-can"></i> حذف</button>` : '<i class="fa-solid fa-lock text-slate-600"></i>'}
+                    </td>
+                </tr>`).join('');
+        }
+        window.deleteSch = function(id) { if(confirm("هل أنت متأكد من الحذف من الجدول؟")) { window.db.schedules = window.db.schedules.filter(x=>x.id!==id); window.saveDB(); window.renderScheduleTable(); } }
 
         window.renderActivityTable = function() {
             const fDate = document.getElementById('actFrom').value; const tDate = document.getElementById('actTo').value; const usr = document.getElementById('actUser').value;
             let aFilter = window.db.activities || [];
+            
             if(fDate) aFilter = aFilter.filter(a => new Date(a.timestamp) >= new Date(fDate));
             if(tDate) aFilter = aFilter.filter(a => new Date(a.timestamp) <= new Date(tDate + 'T23:59:59'));
             if(usr) aFilter = aFilter.filter(a => a.userFullName === usr);
-            const tb = document.getElementById('activityTbody');
-            if(aFilter.length === 0) { tb.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-slate-500">لا يوجد أنشطة مطابقة للبحث</td></tr>'; return; }
-            tb.innerHTML = aFilter.map(a => {
-                if(a.isHidden && window.currentUser.role !== 'مدير نظام' && a.hiddenByUsername !== window.currentUser.username) return '';
-                let trClass = 'hover:bg-slate-800/60 transition-colors'; if(a.type === 'محاولة دخول غير مشروعة') trClass = 'bg-rose-950/40 border-l-4 border-rose-500'; if(a.isHidden) trClass = 'opacity-50 line-through bg-rose-950/20';
-                return `<tr class="${trClass}"><td class="p-3 font-mono text-slate-400 text-[10px]">${a.cairoTime}</td><td class="p-3 font-bold">${a.userFullName} <br><span class="text-amber-500 text-[10px]">${a.userRole}</span></td><td class="p-3 ${a.type === 'محاولة دخول غير مشروعة' ? 'text-rose-400 font-bold' : ''}">${a.type}</td><td class="p-3 text-xs">${a.details}</td><td class="p-3 font-mono text-[10px] text-slate-500"><i class="fa-solid fa-network-wired ml-1"></i>${a.ip || 'غير متوفر'}<br><span class="text-[9px] text-slate-600 block mt-1">${a.deviceId}</span></td><td class="p-3 text-center">${!a.isHidden && (window.currentUser.role === 'مدير إدارة' || window.currentUser.role === 'مدير نظام') ? `<button onclick="toggleAct('${a.id}',true)" class="text-rose-400 hover:text-rose-300 text-[10px] font-bold">إخفاء</button>` : ''} ${a.isHidden ? `<span class="block text-[9px] text-rose-300">أخفاه: ${a.hiddenByFullName}</span>${(window.currentUser.role === 'مدير نظام' || window.currentUser.username === a.hiddenByUsername) ? `<button onclick="toggleAct('${a.id}',false)" class="text-amber-400 hover:text-amber-300 text-[10px] font-bold mt-1">إعادة إظهار</button>` : ''}` : ''}</td></tr>`;
+            
+            const tb = document.getElementById('activityTbody'); 
+            if(aFilter.length === 0) { tb.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-500">لا يوجد أنشطة مطابقة للبحث</td></tr>'; return; }
+            
+            tb.innerHTML = aFilter.slice(0, 100).map(a => `
+                <tr class="hover:bg-slate-800/60 ${a.isHidden ? 'opacity-50' : ''}">
+                    <td class="p-3 font-mono text-[10px] text-slate-400">${a.cairoTime}</td>
+                    <td class="p-3 text-amber-400">${a.userFullName}</td>
+                    <td class="p-3">${a.isHidden ? `<span class="text-rose-400 line-through">${a.type}: ${a.details}</span><br><span class="text-[9px] text-slate-500">تم الإخفاء بواسطة: ${a.hiddenByFullName}</span>` : `${a.type}: ${a.details}`}</td>
+                    <td class="p-3 text-center font-mono text-emerald-400 text-xs">${a.ip || 'غير متوفر'}</td>
+                    <td class="p-3 text-center">
+                        <button onclick="toggleActivityVisibility('${a.id}')" class="${a.isHidden ? 'text-emerald-400' : 'text-slate-500'} hover:text-white transition"><i class="fa-solid ${a.isHidden ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
+                    </td>
+                </tr>`).join('');
+        }
+
+        window.toggleActivityVisibility = function(id) {
+            const a = window.db.activities.find(x => x.id === id);
+            if(a) { a.isHidden = !a.isHidden; a.hiddenByFullName = a.isHidden ? window.currentUser.fullName : null; window.saveDB(); window.renderActivityTable(); }
+        }
+
+        window.renderDeletedTable = function() {
+            const tb = document.getElementById('deletedTbody');
+            const cases = window.db.deletedCases || [];
+            const canDeleteForever = window.currentUser.role === 'مدير نظام' || window.currentUser.role === 'مدير إدارة';
+            
+            if(cases.length === 0) { tb.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-slate-500">الأرشيف فارغ</td></tr>'; return; }
+            tb.innerHTML = cases.map(c => {
+                let claimantsList = c.claimants ? c.claimants.map(cl => ({name: window.decrypt(cl.name), phone: window.decrypt(cl.phone)})) : (c.claimant ? [{name: window.decrypt(c.claimant), phone: window.decrypt(c.claimantPhone)}] : []);
+                let defsList = c.defendants ? c.defendants.map(d => ({name: window.decrypt(d.name), phone: window.decrypt(d.phone)})) : (c.defendant ? [{name: window.decrypt(c.defendant), phone: window.decrypt(c.defendantPhone)}] : []);
+                
+                return `
+                <tr class="hover:bg-slate-800/60">
+                    <td class="p-3 font-bold text-amber-400 font-mono">${c.caseNum}</td>
+                    <td class="p-3">${claimantsList.length > 0 ? claimantsList[0].name : 'غير متوفر'} / ${defsList.length > 0 ? defsList[0].name : 'غير متوفر'}</td>
+                    <td class="p-3 font-mono text-slate-400">${c.dateStr}</td>
+                    <td class="p-3 text-xs text-rose-400">حُذفت بواسطة: <b>${c.deletedBy}</b><br><span class="text-[9px] text-slate-500">${c.deletedAt}</span></td>
+                    <td class="p-3 text-center">
+                        ${canDeleteForever ? `<button onclick="permanentDeleteCase('${c.id}')" class="bg-rose-700 hover:bg-rose-600 text-white px-2 py-1 rounded text-xs shadow"><i class="fa-solid fa-trash-can"></i> حذف نهائي</button>` : '-'}
+                    </td>
+                </tr>`;
             }).join('');
         }
-        window.toggleAct = function(id, hide) { const a = window.db.activities.find(x => x.id === id); a.isHidden = hide; a.hiddenByUsername = hide ? window.currentUser.username : null; a.hiddenByFullName = hide ? window.currentUser.fullName : null; window.saveDB(); window.renderActivityTable(); }
 
-        window.openRepModal = function(target) { window.activeRepTargetField = target; document.getElementById('repSearch').value = ''; window.filterRepSearch(); document.getElementById('repModal').classList.remove('hidden'); }
-        window.filterRepSearch = function() { 
-            const term = document.getElementById('repSearch').value.toLowerCase(); const reps = window.db.representatives || [];
-            const filtered = reps.filter(r => r.entity.includes(term) || r.name.includes(term)); const list = document.getElementById('repList');
-            if(filtered.length === 0) list.innerHTML = '<p class="text-slate-500 text-xs text-center py-2">لا يوجد ممثلين...</p>';
-            else list.innerHTML = filtered.map(r => `<div onclick="selectRep('${r.name}', '${r.phone}')" class="bg-slate-800 border border-slate-700 p-3 rounded cursor-pointer hover:bg-slate-700 hover:border-amber-500 transition-all"><p class="text-amber-400 font-bold text-xs">${r.entity}</p><p class="text-slate-300 text-xs mt-1"><i class="fa-solid fa-user-tie ml-1"></i>${r.name} <span class="mx-2 text-slate-500">|</span> <span class="font-mono text-emerald-400">${r.phone}</span></p></div>`).join(''); 
+        window.permanentDeleteCase = function(id) {
+            if(!confirm('تنبيه خطير! هل أنت متأكد من مسح هذه القضية نهائياً من قاعدة البيانات بلا رجعة؟')) return;
+            const cIdx = window.db.deletedCases.findIndex(x => x.id === id);
+            if(cIdx > -1) {
+                const c = window.db.deletedCases[cIdx];
+                window.logSystemActivity('مسح نهائي', `تم مسح القضية ${c.caseNum} من الأرشيف نهائياً`, window.currentUser.fullName, window.currentUser.role);
+                window.db.deletedCases.splice(cIdx, 1);
+                window.saveDB(); window.renderDeletedTable();
+            }
         }
-        window.selectRep = function(name, phone) { document.getElementById(window.activeRepTargetField + 'Name').value = name; document.getElementById(window.activeRepTargetField + 'Phone').value = phone; window.closeModal('repModal'); }
-        window.handleSaveRep = function(e) { e.preventDefault(); if(!window.db.representatives) window.db.representatives = []; window.db.representatives.push({ id: Date.now(), entity: document.getElementById('repEntity').value, name: document.getElementById('repName').value, phone: document.getElementById('repPhone').value }); window.saveDB(); e.target.reset(); window.renderRepsTable(); }
-        window.renderRepsTable = function() { 
-            const tb = document.getElementById('repsTbody'); const reps = window.db.representatives || [];
-            if(reps.length === 0) { tb.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-slate-500">الدفتر فارغ حالياً</td></tr>'; return; }
-            tb.innerHTML = reps.map(r => `<tr class="hover:bg-slate-800/60"><td class="p-3 font-bold">${r.entity}</td><td class="p-3">${r.name}</td><td class="p-3 font-mono text-emerald-400">${r.phone}</td><td class="p-3 text-center"><button onclick="deleteRep(${r.id})" class="text-rose-500 hover:text-rose-400"><i class="fa-solid fa-trash-can"></i></button></td></tr>`).join(''); 
-        }
-        window.deleteRep = function(id) { if(confirm("حذف الممثل؟")) { window.db.representatives = window.db.representatives.filter(x=>x.id!==id); window.saveDB(); window.renderRepsTable(); } }
 
-        window.handleSaveSchedule = function(e) { e.preventDefault(); if(!window.db.schedules) window.db.schedules = []; window.db.schedules.push({ id: Date.now(), day: document.getElementById('schDay').value, judge: document.getElementById('schJudge').value, sec: document.getElementById('schSec').value }); window.saveDB(); window.renderScheduleTable(); }
-        window.renderScheduleTable = function() {
-            let mySch = window.db.schedules || [];
-            if (window.currentUser.role !== 'مدير إدارة' && window.currentUser.role !== 'مدير نظام') mySch = mySch.filter(s => s.judge === window.currentUser.fullName || s.sec === window.currentUser.fullName);
-            const tb = document.getElementById('schTbody');
-            if(mySch.length === 0) { tb.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-slate-500">لا يوجد جداول معتمدة لك</td></tr>'; return; }
-            tb.innerHTML = mySch.map(s => `<tr class="hover:bg-slate-800/60"><td class="p-3 font-bold text-amber-400">${s.day}</td><td class="p-3">${s.judge}</td><td class="p-3">${s.sec}</td><td class="p-3 text-center">${(window.currentUser.role === 'مدير إدارة' || window.currentUser.role === 'مدير نظام') ? `<button onclick="deleteSch(${s.id})" class="text-rose-500 hover:text-rose-400"><i class="fa-solid fa-trash-can"></i></button>` : '<i class="fa-solid fa-lock text-slate-600"></i>'}</td></tr>`).join('');
+        window.renderUsersTable = function() {
+            const canDelete = window.currentUser.role === 'مدير نظام';
+            document.getElementById('usersTbody').innerHTML = window.db.users.map(u => `
+                <tr class="hover:bg-slate-800/60">
+                    <td class="p-3 font-mono font-bold">${u.username}</td>
+                    <td class="p-3">${u.fullName}</td>
+                    <td class="p-3 text-amber-400 font-bold">${u.role}</td>
+                    <td class="p-3 font-mono text-emerald-400 font-bold">🏅 ${u.points||0}</td>
+                    <td class="p-3 text-center flex justify-center gap-2">
+                        <button onclick="openUserModal('${u.id}')" class="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-xs shadow"><i class="fa-solid fa-pen"></i></button>
+                        ${canDelete ? `<button onclick="deleteUser('${u.id}')" class="bg-rose-700 hover:bg-rose-600 text-white px-2 py-1 rounded text-xs shadow"><i class="fa-solid fa-trash"></i></button>` : ''}
+                    </td>
+                </tr>`).join('');
+            document.getElementById('adminMsg2').value = window.db.msg2Template;
         }
-        window.deleteSch = function(id) { if(confirm("حذف من الجدول؟")) { window.db.schedules = window.db.schedules.filter(x=>x.id!==id); window.saveDB(); window.renderScheduleTable(); } }
 
+        window.deleteUser = function(id) {
+            if(id === 'usr_admin') { alert('لا يمكن حذف الحساب الأساسي للمدير!'); return; }
+            if(!confirm('هل أنت متأكد من حذف هذا الحساب نهائياً؟')) return;
+            const u = window.db.users.find(x => x.id === id);
+            window.db.users = window.db.users.filter(x => x.id !== id);
+            window.logSystemActivity('حذف حساب', `حذف حساب المستخدم: ${u.fullName}`, window.currentUser.fullName, window.currentUser.role);
+            window.saveDB(); window.renderUsersTable();
+        }
+
+        window.saveAdminMsg2 = function() { window.db.msg2Template = document.getElementById('adminMsg2').value; window.saveDB(); alert('تم حفظ القالب بنجاح.'); }
+        
         window.openUserModal = function(id=null) {
-            document.getElementById('uId').value = id || ''; document.getElementById('uUser').value = id ? window.db.users.find(x=>x.id===id).username : ''; document.getElementById('uUser').disabled = !!id;
-            if(id) { const u = window.db.users.find(x=>x.id===id); document.getElementById('uName').value = u.fullName; document.getElementById('uPass').value = ''; document.getElementById('uPass').placeholder = 'اتركه فارغاً إذا لم ترد التغيير'; document.getElementById('uPass').required = false; document.getElementById('uRole').value = u.role; } else { document.getElementById('uName').value = ''; document.getElementById('uPass').value = ''; document.getElementById('uPass').placeholder = '••••••••'; document.getElementById('uPass').required = true; }
+            document.getElementById('uId').value = id || ''; 
+            document.getElementById('uUser').value = id ? window.db.users.find(x=>x.id===id).username : ''; 
+            document.getElementById('uUser').disabled = !!id;
+            document.getElementById('userModalTitle').innerText = id ? 'تعديل بيانات الحساب' : 'إضافة حساب جديد';
+            
+            if(id) { 
+                const u = window.db.users.find(x=>x.id===id); 
+                document.getElementById('uName').value = u.fullName; 
+                document.getElementById('uRole').value = u.role; 
+                document.getElementById('uEmail').value = u.email ? u.email.replace('@eecourts.gov.eg', '') : '';
+            } else { 
+                document.getElementById('uName').value = ''; 
+                document.getElementById('uEmail').value = '';
+            }
             document.getElementById('userModal').classList.remove('hidden');
         }
         
         window.saveUser = async function(e) {
             e.preventDefault(); const id = document.getElementById('uId').value;
-            const inputPass = document.getElementById('uPass').value;
-            let finalPass = null;
-            if(inputPass) finalPass = await window.hashPassword(inputPass);
-
-            if(id) {
-                const u = window.db.users.find(x=>x.id===id); u.fullName = document.getElementById('uName').value; u.role = document.getElementById('uRole').value;
-                if(finalPass) u.password = finalPass;
-            } else { 
-                const existing = window.db.users.find(x=>x.username.toLowerCase() === document.getElementById('uUser').value.toLowerCase());
-                if(existing) { alert('اسم الدخول مستخدم مسبقاً!'); return; }
-                window.db.users.push({id:'usr_'+Date.now(), username:document.getElementById('uUser').value, fullName:document.getElementById('uName').value, password:finalPass, role:document.getElementById('uRole').value, email:'', points:0, createdAt:new Date().toISOString()}); 
+            let pass = document.getElementById('uPass').value; if(pass) pass = await window.hashPassword(pass);
+            const emailInput = document.getElementById('uEmail').value ? document.getElementById('uEmail').value + '@eecourts.gov.eg' : '';
+            
+            if(id) { 
+                const u = window.db.users.find(x=>x.id===id); 
+                u.fullName = document.getElementById('uName').value; 
+                u.role = document.getElementById('uRole').value; 
+                u.email = emailInput;
+                if(pass) u.password = pass; 
+            } 
+            else { 
+                window.db.users.push({id:'usr_'+Date.now(), username:document.getElementById('uUser').value, fullName:document.getElementById('uName').value, email:emailInput, password:pass, role:document.getElementById('uRole').value, points:0, createdAt: new Date().toISOString()}); 
             }
             window.saveDB(); window.closeModal('userModal'); window.renderUsersTable(); window.populateDropdowns();
         }
-        
-        window.deleteUser = function(id) { if(!confirm("هل أنت متأكد من حذف هذا المستخدم نهائياً؟")) return; window.db.users = window.db.users.filter(x => x.id !== id); window.saveDB(); window.renderUsersTable(); window.populateDropdowns(); }
-        
-        window.renderUsersTable = function() {
-            document.getElementById('usersTbody').innerHTML = window.db.users.map(u => `<tr class="hover:bg-slate-800/60"><td class="p-3 font-mono font-bold">${u.username}</td><td class="p-3">${u.fullName}</td><td class="p-3 text-amber-400 font-bold">${u.role}</td><td class="p-3 font-mono text-emerald-400 font-bold">🏅 ${u.points||0}</td><td class="p-3"><span dir="ltr" class="text-slate-400">${window.formatDateDDMMYYYY(u.createdAt.split('T')[0])}</span></td><td class="p-3 text-center"><button onclick="openUserModal('${u.id}')" class="bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white px-2 py-1 rounded text-xs transition-colors"><i class="fa-solid fa-pen"></i></button> ${window.currentUser.role === 'مدير نظام' && u.username !== 'admin' ? `<button onclick="deleteUser('${u.id}')" class="bg-rose-600/20 text-rose-400 hover:bg-rose-600 hover:text-white px-2 py-1 rounded text-xs mr-1 transition-colors"><i class="fa-solid fa-trash-can"></i></button>` : ''}</td></tr>`).join('');
-            document.getElementById('adminMsg2').value = window.db.msg2Template;
+
+        window.renderRepsTable = function() {
+            const tb = document.getElementById('repsTbody'); const reps = window.db.representatives || [];
+            const isAdminOrManager = window.currentUser.role === 'مدير نظام' || window.currentUser.role === 'مدير إدارة';
+            
+            if(reps.length === 0) tb.innerHTML = '<tr><td colspan="5" class="p-4 text-center">الدفتر فارغ</td></tr>';
+            else tb.innerHTML = reps.map(r => `
+                <tr class="hover:bg-slate-800/60">
+                    <td class="p-3 font-bold">${r.entity}</td>
+                    <td class="p-3 text-slate-300 text-[11px]">${r.name || 'ممثل قانوني'}</td>
+                    <td class="p-3 font-mono text-emerald-400">${r.phone}</td>
+                    <td class="p-3 text-center text-[10px] text-slate-400">${r.creator || 'مجهول'}</td>
+                    <td class="p-3 text-center flex justify-center gap-2">
+                        ${isAdminOrManager ? `<button onclick="openEditRepModal('${r.id}')" class="text-blue-400 hover:text-blue-300 transition"><i class="fa-solid fa-pen"></i></button>` : ''}
+                        ${isAdminOrManager ? `<button onclick="deleteRep('${r.id}')" class="text-rose-500 hover:text-rose-400 transition"><i class="fa-solid fa-trash"></i></button>` : '-'}
+                    </td>
+                </tr>`).join(''); 
         }
-        window.saveAdminMsg2 = function() { window.db.msg2Template = document.getElementById('adminMsg2').value; window.saveDB(); alert('تم حفظ القالب بنجاح.'); }
 
-        let c1, c2;
-        window.renderDashboard = function() {
-            const fDate = document.getElementById('dashFrom').value; const tDate = document.getElementById('dashTo').value; const usr = document.getElementById('dashUser').value;
-            let cFilter = window.db.cases || [];
-            if(fDate) cFilter = cFilter.filter(c => { const parts=c.dateStr.split('/'); return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) >= new Date(fDate); });
-            if(tDate) cFilter = cFilter.filter(c => { const parts=c.dateStr.split('/'); return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) <= new Date(tDate + 'T23:59:59'); });
-            if(usr) cFilter = cFilter.filter(c => c.creator === usr);
+        window.openEditRepModal = function(id) {
+            const r = window.db.representatives.find(x => x.id == id); if(!r) return;
+            document.getElementById('editRepId').value = id;
+            document.getElementById('editRepEntity').value = r.entity;
+            document.getElementById('editRepName').value = r.name || 'ممثل قانوني';
+            document.getElementById('editRepPhone').value = r.phone;
+            document.getElementById('editRepModal').classList.remove('hidden');
+        }
 
-            document.getElementById('dashTotalCases').innerText = cFilter.length;
-            let tMsg = 0; cFilter.forEach(c => { if(c.notificationsSent) tMsg += usr ? c.notificationsSent.filter(n=>n.sender===usr).length : c.notificationsSent.length; });
-            document.getElementById('dashTotalMsgs').innerText = tMsg;
-            const mC = cFilter.filter(c => (c.dateStr || '').includes(String(new Date().getMonth()+1).padStart(2,'0')+'/'+new Date().getFullYear())).length;
-            document.getElementById('dashMonthCases').innerText = mC;
-            document.getElementById('dashTeamPts').innerText = window.db.users.filter(u => u.username !== 'admin').reduce((a,b)=>a+(b.points||0),0);
+        window.saveEditedRep = function(e) {
+            e.preventDefault();
+            const id = document.getElementById('editRepId').value;
+            const r = window.db.representatives.find(x => x.id == id);
+            if(r) { 
+                r.entity = document.getElementById('editRepEntity').value; 
+                r.name = document.getElementById('editRepName').value;
+                r.phone = document.getElementById('editRepPhone').value; 
+                window.saveDB(); window.closeModal('editRepModal'); window.renderRepsTable(); 
+            }
+        }
 
-            if(c1) c1.destroy(); if(c2) c2.destroy();
-            c1 = new Chart(document.getElementById('chart1').getContext('2d'), { type:'bar', data: { labels:['إجمالي القضايا','رسائل الإخطارات'], datasets:[{label:'العدد', data:[cFilter.length, tMsg], backgroundColor:['#d4af37','#10b981'], borderRadius: 4}] }, options:{responsive:true,maintainAspectRatio:false, plugins:{legend:{labels:{color:'#cbd5e1'}}}, scales:{y:{ticks:{color:'#94a3b8'}, grid:{color:'#334155'}},x:{ticks:{color:'#cbd5e1'}, grid:{display:false}}}} });
-            const realUsers = window.db.users.filter(u => u.username !== 'admin');
-            c2 = new Chart(document.getElementById('chart2').getContext('2d'), { type:'doughnut', data: { labels:realUsers.map(u=>u.fullName), datasets:[{data:realUsers.map(u=>u.points||0), backgroundColor:['#d4af37','#0ea5e9','#10b981','#f43f5e', '#a855f7', '#f97316'], borderWidth: 0}] }, options:{responsive:true,maintainAspectRatio:false, plugins:{legend:{position:'right', labels:{color:'#cbd5e1', font:{family:'Tajawal'}}}}} });
+        window.deleteRep = function(id) {
+            if(!confirm('هل أنت متأكد من حذف جهة الاتصال من الدفتر؟')) return;
+            window.db.representatives = window.db.representatives.filter(r => r.id != id);
+            window.saveDB(); window.renderRepsTable();
+        }
+
+        window.openRepModal = function(type, index) { 
+            window.activeRepTarget = { type, index }; 
+            document.getElementById('repModal').classList.remove('hidden'); 
+            window.filterRepSearch(); 
+        }
+        
+        window.filterRepSearch = function() { 
+            const term = document.getElementById('repSearch').value.toLowerCase(); 
+            const reps = window.db.representatives || [];
+            
+            const filtered = reps.filter(r => r.entity.includes(term) || (r.name && r.name.includes(term)));
+            const list = document.getElementById('repList');
+            
+            if(filtered.length === 0) { list.innerHTML = '<p class="text-slate-500 text-xs text-center py-2">لا يوجد ممثلين...</p>'; return; }
+            
+            list.innerHTML = filtered.map(r => `
+                <div onclick="selectRep('${r.entity}', '${r.phone}')" class="bg-slate-800 p-3 rounded cursor-pointer hover:bg-slate-700 mb-2 border border-slate-700 hover:border-amber-500 transition-all">
+                    <p class="text-amber-400 font-bold text-xs">${r.entity}</p>
+                    <p class="text-slate-300 text-[11px] mt-1"><i class="fa-solid fa-user-tie ml-1"></i>${r.name || 'ممثل قانوني'} <span class="mx-2 text-slate-500">|</span> <span class="font-mono text-emerald-400 font-bold">${r.phone}</span></p>
+                </div>
+            `).join(''); 
+        }
+
+        window.selectRep = function(name, phone) { 
+            const type = window.activeRepTarget.type; 
+            const idx = window.activeRepTarget.index;
+            document.getElementById(`${type}Name_${idx}`).value = name;
+            document.getElementById(`${type}Phone_${idx}`).value = phone;
+            window.closeModal('repModal'); 
         }
     </script>
 </body>
